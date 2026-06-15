@@ -73,8 +73,8 @@ fn main() {
         Command::Init => commands::init::run(),
         Command::Import { path } => commands::import::run(&path),
         Command::Book { sub } => match sub {
-            BookCommand::List => unimplemented_json("book list"),
-            BookCommand::Use { .. } => unimplemented_json("book use"),
+            BookCommand::List => commands::book::list(),
+            BookCommand::Use { book_id } => commands::book::use_book(&book_id),
         },
         Command::Chapter { sub } => match sub {
             ChapterCommand::List => unimplemented_json("chapter list"),
