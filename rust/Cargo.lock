@@ -332,6 +332,7 @@ dependencies = [
  "fishread-core",
  "serde",
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]
