@@ -1,1 +1,2 @@
-// Book domain model — populated in M2+
+pub mod model;
+pub use model::{Book, BookFormat, BookId, Timestamp};

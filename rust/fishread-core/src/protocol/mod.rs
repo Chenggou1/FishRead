@@ -1,4 +1,8 @@
+pub mod dto;
+
 use serde::Serialize;
+
+pub use dto::{BookDto, ImportResultDto, ImportWarningDto};
 
 use crate::error::FishReadError;
 

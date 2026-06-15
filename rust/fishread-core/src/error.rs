@@ -37,6 +37,15 @@ pub enum FishReadError {
 }
 
 impl FishReadError {
+    /// Maps to CLI exit code: 1 = business error, 2 = argument error, 3 = internal error.
+    pub fn exit_code(&self) -> i32 {
+        match self {
+            Self::InvalidArgument(_) => 2,
+            Self::Database(_) | Self::DatabaseNotInitialized => 3,
+            _ => 1,
+        }
+    }
+
     pub fn code(&self) -> &'static str {
         match self {
             Self::DatabaseNotInitialized => "DATABASE_NOT_INITIALIZED",

@@ -71,7 +71,7 @@ fn main() {
 
     let (json, exit_code) = match cli.command {
         Command::Init => commands::init::run(),
-        Command::Import { .. } => unimplemented_json("import"),
+        Command::Import { path } => commands::import::run(&path),
         Command::Book { sub } => match sub {
             BookCommand::List => unimplemented_json("book list"),
             BookCommand::Use { .. } => unimplemented_json("book use"),

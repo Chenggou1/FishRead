@@ -1,1 +1,2 @@
-// Chapter domain model — populated in M3+
+pub mod model;
+pub use model::{Chapter, ChapterId, ChapterIndex, ChapterMeta};
