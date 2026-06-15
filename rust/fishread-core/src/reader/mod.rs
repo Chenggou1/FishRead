@@ -1,1 +1,3 @@
-// Reading position and chunk logic — populated in M7+
+pub mod chunk;
+
+pub use chunk::{split, ReadingChunk, CHUNK_SIZE};
