@@ -1,1 +1,3 @@
-// EPUB parsing — populated in M3
+pub mod normalize;
+pub mod package;
+pub mod text;
