@@ -2,7 +2,10 @@ pub mod dto;
 
 use serde::Serialize;
 
-pub use dto::{BookDto, BookListDto, BookUseDto, ImportResultDto, ImportWarningDto, PositionDto};
+pub use dto::{
+    BookDto, BookListDto, BookRefDto, BookUseDto, ChapterListDto, ImportResultDto, ImportWarningDto,
+    PositionDto,
+};
 
 use crate::error::FishReadError;
 

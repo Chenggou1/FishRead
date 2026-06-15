@@ -77,7 +77,7 @@ fn main() {
             BookCommand::Use { book_id } => commands::book::use_book(&book_id),
         },
         Command::Chapter { sub } => match sub {
-            ChapterCommand::List => unimplemented_json("chapter list"),
+            ChapterCommand::List => commands::chapter::list(),
         },
         Command::Read { sub } => match sub {
             ReadCommand::Current => unimplemented_json("read current"),

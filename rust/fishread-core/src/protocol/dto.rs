@@ -1,6 +1,7 @@
 use serde::Serialize;
 
 use crate::book::service::{BookListResult, BookUseResult};
+use crate::chapter::service::ChapterListResult;
 use crate::importer::model::{ImportResult, ImportWarning};
 
 #[derive(Debug, Serialize)]
@@ -95,6 +96,47 @@ pub struct PositionDto {
 pub struct BookUseDto {
     pub book: BookDto,
     pub position: PositionDto,
+}
+
+#[derive(Debug, Serialize)]
+pub struct BookRefDto {
+    pub id: String,
+    pub title: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ChapterListItemDto {
+    pub id: String,
+    pub index: i64,
+    pub title: String,
+    pub current: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ChapterListDto {
+    pub book: BookRefDto,
+    pub chapters: Vec<ChapterListItemDto>,
+}
+
+impl From<ChapterListResult> for ChapterListDto {
+    fn from(r: ChapterListResult) -> Self {
+        Self {
+            book: BookRefDto {
+                id: r.book_id,
+                title: r.book_title,
+            },
+            chapters: r
+                .chapters
+                .into_iter()
+                .map(|c| ChapterListItemDto {
+                    id: c.id,
+                    index: c.index,
+                    title: c.title,
+                    current: c.current,
+                })
+                .collect(),
+        }
+    }
 }
 
 impl From<BookUseResult> for BookUseDto {
