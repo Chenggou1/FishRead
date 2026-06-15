@@ -3,6 +3,7 @@ use serde::Serialize;
 use crate::book::service::{BookListResult, BookUseResult};
 use crate::chapter::service::ChapterListResult;
 use crate::importer::model::{ImportResult, ImportWarning};
+use crate::reader::service::ReaderState;
 
 #[derive(Debug, Serialize)]
 pub struct BookDto {
@@ -135,6 +136,78 @@ impl From<ChapterListResult> for ChapterListDto {
                     current: c.current,
                 })
                 .collect(),
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct BookReaderDto {
+    pub id: String,
+    pub title: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub author: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ChapterRefDto {
+    pub id: String,
+    pub index: i64,
+    pub title: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ChunkDto {
+    pub index: i64,
+    pub text: String,
+    pub is_first: bool,
+    pub is_last: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ProgressDto {
+    pub chapter_index: i64,
+    pub chunk_index: i64,
+    pub chapter_percent: f64,
+    pub book_percent: f64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ReaderStateDto {
+    pub book: BookReaderDto,
+    pub chapter: ChapterRefDto,
+    pub chunk: ChunkDto,
+    pub progress: ProgressDto,
+    pub start_of_book: bool,
+    pub end_of_book: bool,
+}
+
+impl From<ReaderState> for ReaderStateDto {
+    fn from(s: ReaderState) -> Self {
+        Self {
+            book: BookReaderDto {
+                id: s.book.id,
+                title: s.book.title,
+                author: s.book.author,
+            },
+            chapter: ChapterRefDto {
+                id: s.chapter.id,
+                index: s.chapter.index,
+                title: s.chapter.title,
+            },
+            chunk: ChunkDto {
+                index: s.chunk.index as i64,
+                text: s.chunk.text,
+                is_first: s.chunk.is_first,
+                is_last: s.chunk.is_last,
+            },
+            progress: ProgressDto {
+                chapter_index: s.progress.chapter_index,
+                chunk_index: s.progress.chunk_index,
+                chapter_percent: s.progress.chapter_percent,
+                book_percent: s.progress.book_percent,
+            },
+            start_of_book: s.start_of_book,
+            end_of_book: s.end_of_book,
         }
     }
 }

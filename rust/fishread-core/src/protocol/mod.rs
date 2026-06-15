@@ -4,7 +4,7 @@ use serde::Serialize;
 
 pub use dto::{
     BookDto, BookListDto, BookRefDto, BookUseDto, ChapterListDto, ImportResultDto, ImportWarningDto,
-    PositionDto,
+    PositionDto, ReaderStateDto,
 };
 
 use crate::error::FishReadError;

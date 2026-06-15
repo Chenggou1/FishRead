@@ -80,8 +80,8 @@ fn main() {
             ChapterCommand::List => commands::chapter::list(),
         },
         Command::Read { sub } => match sub {
-            ReadCommand::Current => unimplemented_json("read current"),
-            ReadCommand::Next => unimplemented_json("read next"),
+            ReadCommand::Current => commands::read::current(),
+            ReadCommand::Next => commands::read::next(),
             ReadCommand::Prev => unimplemented_json("read prev"),
         },
     };
