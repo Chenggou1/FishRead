@@ -1,0 +1,6 @@
+internal/
+target/
+*.db
+
+CLAUDE.md
+AGENTS.md

@@ -1,0 +1,6 @@
+[workspace]
+members = [
+    "fishread-core",
+    "fishread-cli",
+]
+resolver = "2"
