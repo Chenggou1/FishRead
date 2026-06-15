@@ -82,7 +82,7 @@ fn main() {
         Command::Read { sub } => match sub {
             ReadCommand::Current => commands::read::current(),
             ReadCommand::Next => commands::read::next(),
-            ReadCommand::Prev => unimplemented_json("read prev"),
+            ReadCommand::Prev => commands::read::prev(),
         },
     };
 
@@ -90,13 +90,3 @@ fn main() {
     std::process::exit(exit_code);
 }
 
-fn unimplemented_json(cmd: &str) -> (String, i32) {
-    let json = serde_json::json!({
-        "ok": false,
-        "error": {
-            "code": "NOT_IMPLEMENTED",
-            "message": format!("`{cmd}` is not yet implemented")
-        }
-    });
-    (json.to_string(), 3)
-}

@@ -37,6 +37,12 @@ pub struct ReaderState {
     pub end_of_book: bool,
 }
 
+enum Direction {
+    Stay,
+    Next,
+    Prev,
+}
+
 pub struct ReaderService<'a> {
     conn: &'a rusqlite::Connection,
 }
@@ -47,16 +53,18 @@ impl<'a> ReaderService<'a> {
     }
 
     pub fn current(&self) -> Result<ReaderState, FishReadError> {
-        self.read_at_position(false)
+        self.read(Direction::Stay)
     }
 
-    pub fn advance(&self) -> Result<ReaderState, FishReadError> {
-        self.read_at_position(true)
+    pub fn next(&self) -> Result<ReaderState, FishReadError> {
+        self.read(Direction::Next)
     }
 
-    /// Core read logic. When `advance` is true, moves forward one chunk/chapter
-    /// and saves the new position before returning. When false, position is unchanged.
-    fn read_at_position(&self, advance: bool) -> Result<ReaderState, FishReadError> {
+    pub fn prev(&self) -> Result<ReaderState, FishReadError> {
+        self.read(Direction::Prev)
+    }
+
+    fn read(&self, direction: Direction) -> Result<ReaderState, FishReadError> {
         let book_id = settings_repo::get_current_book_id(self.conn)
             .map_err(|e| FishReadError::Database(e.to_string()))?
             .ok_or(FishReadError::NoCurrentBook)?;
@@ -73,49 +81,62 @@ impl<'a> ReaderService<'a> {
                 .map_err(|e| FishReadError::Database(e.to_string()))?
                 .unwrap_or((0, 0));
 
-        let chapter = chapter_repo::find_by_index(self.conn, &book_id, chapter_index)
+        let mut chapter = chapter_repo::find_by_index(self.conn, &book_id, chapter_index)
             .map_err(|e| FishReadError::Database(e.to_string()))?
             .ok_or(FishReadError::ChapterNotFound)?;
 
-        let chunks = chunk::split(&chapter.content, chunk::CHUNK_SIZE);
-        let chunk_index_clamped = (chunk_index as usize).min(chunks.len().saturating_sub(1));
+        let mut chunks = chunk::split(&chapter.content, chunk::CHUNK_SIZE);
+        let chunk_idx = (chunk_index as usize).min(chunks.len().saturating_sub(1));
 
-        if advance {
-            let next_chunk = chunk_index_clamped + 1;
-            if next_chunk < chunks.len() {
-                // advance within same chapter
-                chunk_index = next_chunk as i64;
-            } else if chapter_index + 1 < total_chapters as i64 {
-                // advance to next chapter
-                chapter_index += 1;
-                chunk_index = 0;
+        match direction {
+            Direction::Stay => {}
+
+            Direction::Next => {
+                let next = chunk_idx + 1;
+                if next < chunks.len() {
+                    chunk_index = next as i64;
+                } else if chapter_index + 1 < total_chapters as i64 {
+                    chapter_index += 1;
+                    chunk_index = 0;
+                    chapter = chapter_repo::find_by_index(self.conn, &book_id, chapter_index)
+                        .map_err(|e| FishReadError::Database(e.to_string()))?
+                        .ok_or(FishReadError::ChapterNotFound)?;
+                    chunks = chunk::split(&chapter.content, chunk::CHUNK_SIZE);
+                }
+                // else: end of book — position unchanged
+                self.save_position(&book_id, chapter_index, chunk_index)?;
             }
-            // else: already at end of book — don't move
 
-            self.save_position(&book_id, chapter_index, chunk_index)?;
+            Direction::Prev => {
+                if chunk_idx > 0 {
+                    chunk_index = chunk_idx as i64 - 1;
+                } else if chapter_index > 0 {
+                    chapter_index -= 1;
+                    chapter = chapter_repo::find_by_index(self.conn, &book_id, chapter_index)
+                        .map_err(|e| FishReadError::Database(e.to_string()))?
+                        .ok_or(FishReadError::ChapterNotFound)?;
+                    chunks = chunk::split(&chapter.content, chunk::CHUNK_SIZE);
+                    chunk_index = chunks.len().saturating_sub(1) as i64;
+                }
+                // else: start of book — position unchanged
+                self.save_position(&book_id, chapter_index, chunk_index)?;
+            }
         }
 
-        // Re-fetch chapter if chapter_index changed
-        let chapter = if advance && chunk_index == 0 && chapter_index != chapter.index.0 {
-            chapter_repo::find_by_index(self.conn, &book_id, chapter_index)
-                .map_err(|e| FishReadError::Database(e.to_string()))?
-                .ok_or(FishReadError::ChapterNotFound)?
-        } else {
-            chapter
-        };
-
-        let chunks = chunk::split(&chapter.content, chunk::CHUNK_SIZE);
-        let chunk_idx = (chunk_index as usize).min(chunks.len().saturating_sub(1));
-        let reading_chunk = &chunks[chunk_idx];
-
+        let final_idx = (chunk_index as usize).min(chunks.len().saturating_sub(1));
+        let reading_chunk = &chunks[final_idx];
         let total_chunks = chunks.len();
-        let chapter_pct = chunk::chapter_percent(chunk_idx, total_chunks);
-        let book_pct =
-            chunk::book_percent(chapter_index as usize, chunk_idx, total_chunks, total_chapters);
 
-        let start_of_book = chapter_index == 0 && chunk_idx == 0;
-        let end_of_book =
-            chapter_index + 1 == total_chapters as i64 && reading_chunk.is_last;
+        let chapter_pct = chunk::chapter_percent(final_idx, total_chunks);
+        let book_pct = chunk::book_percent(
+            chapter_index as usize,
+            final_idx,
+            total_chunks,
+            total_chapters,
+        );
+
+        let start_of_book = chapter_index == 0 && final_idx == 0;
+        let end_of_book = chapter_index + 1 == total_chapters as i64 && reading_chunk.is_last;
 
         Ok(ReaderState {
             book: BookInfo {
@@ -136,7 +157,7 @@ impl<'a> ReaderService<'a> {
             },
             progress: ProgressInfo {
                 chapter_index,
-                chunk_index: chunk_idx as i64,
+                chunk_index: final_idx as i64,
                 chapter_percent: chapter_pct,
                 book_percent: book_pct,
             },
@@ -154,7 +175,8 @@ impl<'a> ReaderService<'a> {
         let now = crate::book::model::Timestamp::now().0;
         self.conn
             .execute(
-                "UPDATE reading_positions SET chapter_index = ?1, chunk_index = ?2, updated_at = ?3
+                "UPDATE reading_positions
+                 SET chapter_index = ?1, chunk_index = ?2, updated_at = ?3
                  WHERE book_id = ?4",
                 rusqlite::params![chapter_index, chunk_index, now, book_id],
             )
