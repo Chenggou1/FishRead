@@ -6,7 +6,7 @@ pub enum FishReadError {
     DatabaseNotInitialized,
 
     #[error("database error: {0}")]
-    Database(#[from] anyhow::Error),
+    Database(String),
 
     #[error("invalid argument: {0}")]
     InvalidArgument(String),
