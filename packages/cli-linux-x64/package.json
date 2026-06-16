@@ -1,0 +1,11 @@
+{
+  "name": "@fishread/cli-linux-x64",
+  "version": "0.1.0",
+  "type": "module",
+  "os": ["linux"],
+  "cpu": ["x64"],
+  "files": ["bin/", "postinstall.js"],
+  "scripts": {
+    "postinstall": "node postinstall.js"
+  }
+}

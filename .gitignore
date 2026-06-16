@@ -5,3 +5,13 @@ target/
 CLAUDE.md
 AGENTS.md
 .DS_Store
+.pi/
+
+# JS workspace
+node_modules/
+dist/
+*.tgz
+
+# Platform binary files (populated at build/publish time)
+packages/cli-*/bin/fishread
+packages/cli-*/bin/fishread.exe

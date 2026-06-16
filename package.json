@@ -1,0 +1,15 @@
+{
+  "name": "fishread",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "pnpm -r build",
+    "check": "pnpm -r check",
+    "build:rust": "cargo build --manifest-path rust/Cargo.toml -p fishread-cli",
+    "dev:rust": "cargo watch --manifest-path rust/Cargo.toml -x 'build -p fishread-cli'",
+    "test:rust": "cargo test --manifest-path rust/Cargo.toml --workspace",
+    "format:rust": "cargo fmt --manifest-path rust/Cargo.toml --all",
+    "smoke:rust": "node scripts/smoke-cli.js",
+    "dev": "pi --no-extensions -e packages/pi-extension/src/index.ts"
+  }
+}

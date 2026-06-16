@@ -1,0 +1,19 @@
+{
+  "name": "@fishread/pi-extension",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "FishRead Pi extension — read EPUB in the conversation thread",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@fishread/cli": "workspace:*"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "latest",
+    "@earendil-works/pi-tui": "latest",
+    "typescript": "^5.0.0"
+  }
+}

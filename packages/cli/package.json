@@ -1,0 +1,27 @@
+{
+  "name": "@fishread/cli",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "FishRead CLI — local EPUB reading runtime",
+  "exports": {
+    ".": {
+      "import": "./index.js",
+      "types": "./index.d.ts"
+    }
+  },
+  "types": "index.d.ts",
+  "bin": {
+    "fishread": "bin/fishread.js"
+  },
+  "files": [
+    "bin/",
+    "index.js"
+  ],
+  "optionalDependencies": {
+    "@fishread/cli-darwin-arm64": "workspace:*",
+    "@fishread/cli-darwin-x64": "workspace:*",
+    "@fishread/cli-linux-arm64": "workspace:*",
+    "@fishread/cli-linux-x64": "workspace:*",
+    "@fishread/cli-win32-x64": "workspace:*"
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "name": "@fishread/cli-darwin-arm64",
+  "version": "0.1.0",
+  "type": "module",
+  "os": ["darwin"],
+  "cpu": ["arm64"],
+  "files": ["bin/", "postinstall.js"],
+  "scripts": {
+    "postinstall": "node postinstall.js"
+  }
+}
