@@ -3,9 +3,9 @@ target/
 *.db
 
 CLAUDE.md
-AGENTS.md
 .DS_Store
 .pi/
+.agents/
 
 # JS workspace
 node_modules/
