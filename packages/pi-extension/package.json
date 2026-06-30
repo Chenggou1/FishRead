@@ -9,7 +9,7 @@
     "check": "tsc --noEmit"
   },
   "dependencies": {
-    "@fishread/cli": "workspace:*"
+    "@fishread/sdk": "workspace:*"
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "latest",

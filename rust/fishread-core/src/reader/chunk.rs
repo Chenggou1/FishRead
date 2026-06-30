@@ -1,4 +1,4 @@
-pub const CHUNK_SIZE: usize = 600;
+pub const CHUNK_SIZE: usize = 320;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ReadingChunk {
@@ -202,9 +202,9 @@ mod tests {
 
     #[test]
     fn oversized_paragraph_splits_at_sentence_boundary() {
-        // Two sentences, each 350 chars — should become 2 chunks, not hard-cut mid-word
-        let s1 = format!("{}。", "甲".repeat(349));
-        let s2 = format!("{}。", "乙".repeat(349));
+        // Two sentences, each below CHUNK_SIZE, should become 2 chunks, not hard-cut mid-word.
+        let s1 = format!("{}。", "甲".repeat(249));
+        let s2 = format!("{}。", "乙".repeat(249));
         let para = format!("{}{}", s1, s2);
         let chunks = split(&para, CHUNK_SIZE);
         assert_eq!(chunks.len(), 2);
@@ -217,7 +217,7 @@ mod tests {
         // No punctuation — must hard-cut
         let long = "乙".repeat(1500);
         let chunks = split(&long, CHUNK_SIZE);
-        assert_eq!(chunks.len(), 3);
+        assert_eq!(chunks.len(), 5);
         for chunk in &chunks {
             assert!(chunk.text.chars().count() <= CHUNK_SIZE);
         }
@@ -225,8 +225,8 @@ mod tests {
 
     #[test]
     fn english_sentence_boundary_respected() {
-        let s1 = format!("{} end.", "a".repeat(350));
-        let s2 = format!("{} end.", "b".repeat(350));
+        let s1 = format!("{} end.", "a".repeat(250));
+        let s2 = format!("{} end.", "b".repeat(250));
         let para = format!("{} {}", s1, s2);
         let chunks = split(&para, CHUNK_SIZE);
         assert!(chunks.len() >= 2);
@@ -301,8 +301,8 @@ mod tests {
     #[test]
     fn closing_quote_stays_with_sentence() {
         // \u{201D} = RIGHT DOUBLE QUOTATION MARK "
-        let s1 = format!("{}\u{3002}\u{201D}", "甲".repeat(349)); // 349甲。"
-        let s2 = format!("{}\u{3002}", "乙".repeat(349)); // 349乙。
+        let s1 = format!("{}\u{3002}\u{201D}", "甲".repeat(249)); // 249甲。"
+        let s2 = format!("{}\u{3002}", "乙".repeat(249)); // 249乙。
         let para = format!("{}{}", s1, s2);
         let chunks = split(&para, CHUNK_SIZE);
         assert!(chunks[0].text.ends_with('\u{201D}'));
