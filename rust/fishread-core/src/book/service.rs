@@ -27,6 +27,14 @@ pub struct BookUseResult {
     pub position: PositionInfo,
 }
 
+pub struct BookDeleteResult {
+    pub id: String,
+    pub title: String,
+    pub author: Option<String>,
+    pub format: String,
+    pub cleared_current: bool,
+}
+
 pub struct LibraryService<'a> {
     conn: &'a rusqlite::Connection,
 }
@@ -82,6 +90,44 @@ impl<'a> LibraryService<'a> {
                 chapter_index,
                 chunk_index,
             },
+        })
+    }
+
+    pub fn delete_book(&self, book_id: &str) -> Result<BookDeleteResult, FishReadError> {
+        let row = book_repo::find_by_id(self.conn, book_id)
+            .map_err(|e| FishReadError::Database(e.to_string()))?
+            .ok_or_else(|| FishReadError::BookNotFound(book_id.to_owned()))?;
+
+        let current_id = settings_repo::get_current_book_id(self.conn)
+            .map_err(|e| FishReadError::Database(e.to_string()))?;
+        let cleared_current = current_id.as_deref() == Some(book_id);
+
+        let tx = self
+            .conn
+            .unchecked_transaction()
+            .map_err(|e| FishReadError::Database(e.to_string()))?;
+
+        book_repo::delete_chapters(&tx, book_id)
+            .map_err(|e| FishReadError::Database(e.to_string()))?;
+        book_repo::delete_reading_position(&tx, book_id)
+            .map_err(|e| FishReadError::Database(e.to_string()))?;
+        book_repo::delete_by_id(&tx, book_id)
+            .map_err(|e| FishReadError::Database(e.to_string()))?;
+
+        if cleared_current {
+            settings_repo::clear_current_book_id(&tx)
+                .map_err(|e| FishReadError::Database(e.to_string()))?;
+        }
+
+        tx.commit()
+            .map_err(|e| FishReadError::Database(e.to_string()))?;
+
+        Ok(BookDeleteResult {
+            id: row.id,
+            title: row.title,
+            author: row.author,
+            format: row.format,
+            cleared_current,
         })
     }
 }

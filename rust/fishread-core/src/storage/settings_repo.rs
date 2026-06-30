@@ -21,3 +21,9 @@ pub fn set_current_book_id(conn: &rusqlite::Connection, book_id: &str) -> anyhow
     .context("failed to set current_book_id")?;
     Ok(())
 }
+
+pub fn clear_current_book_id(conn: &rusqlite::Connection) -> anyhow::Result<()> {
+    conn.execute("DELETE FROM settings WHERE key = 'current_book_id'", [])
+        .context("failed to clear current_book_id")?;
+    Ok(())
+}

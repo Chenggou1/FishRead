@@ -48,6 +48,11 @@ enum BookCommand {
         /// Book ID to select
         book_id: String,
     },
+    /// Delete a book and its local reading state
+    Delete {
+        /// Book ID to delete
+        book_id: String,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -75,6 +80,7 @@ fn main() {
         Command::Book { sub } => match sub {
             BookCommand::List => commands::book::list(),
             BookCommand::Use { book_id } => commands::book::use_book(&book_id),
+            BookCommand::Delete { book_id } => commands::book::delete_book(&book_id),
         },
         Command::Chapter { sub } => match sub {
             ChapterCommand::List => commands::chapter::list(),

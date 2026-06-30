@@ -25,9 +25,36 @@ fn run_ok(c: &mut Command) -> serde_json::Value {
     json
 }
 
+fn run_err(c: &mut Command, expected_exit: i32) -> serde_json::Value {
+    let out = c.output().expect("failed to run fishread");
+    assert_eq!(
+        out.status.code(),
+        Some(expected_exit),
+        "expected exit {expected_exit}, stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let json: serde_json::Value =
+        serde_json::from_slice(&out.stdout).expect("output is not valid JSON");
+    assert_eq!(
+        json["protocol_version"], 1,
+        "expected protocol version 1, got: {json}"
+    );
+    assert_eq!(json["ok"], false, "expected ok:false, got: {json}");
+    json
+}
+
+fn count_rows(db_path: &str, sql: &str, value: &str) -> i64 {
+    let conn = rusqlite::Connection::open(db_path).unwrap();
+    conn.query_row(sql, [value], |row| row.get(0)).unwrap()
+}
+
 const FIXTURE: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../fixtures/epub/multi-chapter.epub"
+);
+const SIMPLE_FIXTURE: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../fixtures/epub/simple.epub"
 );
 
 #[test]
@@ -111,14 +138,103 @@ fn error_book_not_found() {
     run_ok(cmd(db_path).arg("init"));
     run_ok(cmd(db_path).args(["import", FIXTURE]));
 
-    let out = cmd(db_path)
-        .args(["book", "use", "book_nonexistent"])
-        .output()
-        .unwrap();
-    assert_eq!(out.status.code(), Some(1));
-    let j: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
-    assert_eq!(j["protocol_version"], 1);
-    assert_eq!(j["ok"], false);
+    let j = run_err(cmd(db_path).args(["book", "use", "book_nonexistent"]), 1);
+    assert_eq!(j["error"]["code"], "BOOK_NOT_FOUND");
+}
+
+#[test]
+fn book_delete_clears_current_book_and_dependent_records() {
+    let db = NamedTempFile::new().unwrap();
+    let db_path = db.path().to_str().unwrap();
+    run_ok(cmd(db_path).arg("init"));
+    let imported = run_ok(cmd(db_path).args(["import", FIXTURE]));
+    let book_id = imported["data"]["book"]["id"].as_str().unwrap().to_owned();
+
+    let j = run_ok(cmd(db_path).args(["book", "delete", &book_id]));
+    assert_eq!(j["data"]["deleted"]["id"], book_id.as_str());
+    assert_eq!(j["data"]["cleared_current"], true);
+
+    let j = run_ok(cmd(db_path).args(["book", "list"]));
+    assert_eq!(j["data"]["books"].as_array().unwrap().len(), 0);
+
+    assert_eq!(
+        count_rows(
+            db_path,
+            "SELECT COUNT(*) FROM books WHERE id = ?1",
+            &book_id
+        ),
+        0
+    );
+    assert_eq!(
+        count_rows(
+            db_path,
+            "SELECT COUNT(*) FROM chapters WHERE book_id = ?1",
+            &book_id
+        ),
+        0
+    );
+    assert_eq!(
+        count_rows(
+            db_path,
+            "SELECT COUNT(*) FROM reading_positions WHERE book_id = ?1",
+            &book_id
+        ),
+        0
+    );
+    assert_eq!(
+        count_rows(
+            db_path,
+            "SELECT COUNT(*) FROM settings WHERE key = 'current_book_id' AND value = ?1",
+            &book_id
+        ),
+        0
+    );
+
+    let j = run_err(cmd(db_path).args(["read", "current"]), 1);
+    assert_eq!(j["error"]["code"], "NO_CURRENT_BOOK");
+}
+
+#[test]
+fn book_delete_non_current_keeps_current_book() {
+    let db = NamedTempFile::new().unwrap();
+    let db_path = db.path().to_str().unwrap();
+    run_ok(cmd(db_path).arg("init"));
+
+    let first = run_ok(cmd(db_path).args(["import", FIXTURE]));
+    let current_id = first["data"]["book"]["id"].as_str().unwrap().to_owned();
+    let second = run_ok(cmd(db_path).args(["import", SIMPLE_FIXTURE]));
+    let deleted_id = second["data"]["book"]["id"].as_str().unwrap().to_owned();
+
+    let j = run_ok(cmd(db_path).args(["book", "delete", &deleted_id]));
+    assert_eq!(j["data"]["deleted"]["id"], deleted_id.as_str());
+    assert_eq!(j["data"]["cleared_current"], false);
+
+    let j = run_ok(cmd(db_path).args(["book", "list"]));
+    let books = j["data"]["books"].as_array().unwrap();
+    assert_eq!(books.len(), 1);
+    assert_eq!(books[0]["id"], current_id.as_str());
+    assert_eq!(books[0]["current"], true);
+
+    assert_eq!(
+        count_rows(
+            db_path,
+            "SELECT COUNT(*) FROM chapters WHERE book_id = ?1",
+            &deleted_id
+        ),
+        0
+    );
+
+    let j = run_ok(cmd(db_path).args(["read", "current"]));
+    assert_eq!(j["data"]["book"]["id"], current_id.as_str());
+}
+
+#[test]
+fn book_delete_missing_book_returns_not_found() {
+    let db = NamedTempFile::new().unwrap();
+    let db_path = db.path().to_str().unwrap();
+    run_ok(cmd(db_path).arg("init"));
+
+    let j = run_err(cmd(db_path).args(["book", "delete", "book_nonexistent"]), 1);
     assert_eq!(j["error"]["code"], "BOOK_NOT_FOUND");
 }
 

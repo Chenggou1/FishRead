@@ -3,7 +3,7 @@ pub mod dto;
 use serde::Serialize;
 
 pub use dto::{
-    BookDto, BookListDto, BookRefDto, BookUseDto, ChapterListDto, ImportResultDto,
+    BookDeleteDto, BookDto, BookListDto, BookRefDto, BookUseDto, ChapterListDto, ImportResultDto,
     ImportWarningDto, PositionDto, ReaderStateDto,
 };
 

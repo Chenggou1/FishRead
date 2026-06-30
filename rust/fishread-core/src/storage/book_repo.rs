@@ -86,3 +86,24 @@ pub fn upsert_reading_position(conn: &rusqlite::Connection, book_id: &str) -> an
     .context("failed to upsert reading position")?;
     Ok(())
 }
+
+pub fn delete_chapters(conn: &rusqlite::Connection, book_id: &str) -> anyhow::Result<usize> {
+    conn.execute("DELETE FROM chapters WHERE book_id = ?1", params![book_id])
+        .context("failed to delete book chapters")
+}
+
+pub fn delete_reading_position(
+    conn: &rusqlite::Connection,
+    book_id: &str,
+) -> anyhow::Result<usize> {
+    conn.execute(
+        "DELETE FROM reading_positions WHERE book_id = ?1",
+        params![book_id],
+    )
+    .context("failed to delete book reading position")
+}
+
+pub fn delete_by_id(conn: &rusqlite::Connection, book_id: &str) -> anyhow::Result<usize> {
+    conn.execute("DELETE FROM books WHERE id = ?1", params![book_id])
+        .context("failed to delete book")
+}

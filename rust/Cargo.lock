@@ -330,6 +330,7 @@ dependencies = [
  "anyhow",
  "clap",
  "fishread-core",
+ "rusqlite",
  "serde",
  "serde_json",
  "tempfile",
