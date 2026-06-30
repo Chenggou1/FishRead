@@ -3,13 +3,23 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "pnpm -r build",
-    "check": "pnpm -r check",
-    "build:rust": "cargo build --manifest-path rust/Cargo.toml -p fishread-cli",
-    "dev:rust": "cargo watch --manifest-path rust/Cargo.toml -x 'build -p fishread-cli'",
+    "build": "pnpm run build:rust && pnpm run build:js",
+    "build:rust": "cargo build --manifest-path rust/Cargo.toml --workspace",
+    "build:js": "pnpm -r --if-present run build",
+    "check": "pnpm run check:rust && pnpm run check:js",
+    "check:rust": "pnpm run format:rust:check && pnpm run lint:rust && pnpm run test:rust",
+    "check:js": "pnpm -r --if-present run check",
+    "test": "pnpm run test:rust",
     "test:rust": "cargo test --manifest-path rust/Cargo.toml --workspace",
+    "lint": "pnpm run lint:rust",
+    "lint:rust": "cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets --all-features -- -D warnings",
+    "format": "pnpm run format:rust",
+    "format:check": "pnpm run format:rust:check",
     "format:rust": "cargo fmt --manifest-path rust/Cargo.toml --all",
+    "format:rust:check": "cargo fmt --manifest-path rust/Cargo.toml --all -- --check",
+    "install:rust": "cargo install --path rust/fishread-cli --bin fishread --locked --force",
+    "smoke": "pnpm run smoke:rust",
     "smoke:rust": "node scripts/smoke-cli.js",
-    "dev": "pi --no-extensions -e packages/pi-extension/src/index.ts"
+    "dev:pi": "pi --no-extensions -e packages/pi-extension/src/index.ts"
   }
 }
