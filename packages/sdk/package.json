@@ -1,0 +1,29 @@
+{
+  "name": "@fishread/sdk",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "FishRead SDK — shared TypeScript access to the local reading runtime",
+  "main": "dist/index.js",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./src/index.ts"
+    }
+  },
+  "types": "src/index.ts",
+  "files": [
+    "dist/",
+    "src/"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@fishread/cli": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^25.0.0",
+    "typescript": "^5.0.0"
+  }
+}
