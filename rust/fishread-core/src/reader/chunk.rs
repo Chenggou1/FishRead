@@ -32,7 +32,11 @@ fn build_chunks(content: &str, chunk_size: usize) -> Vec<String> {
     let mut chunks: Vec<String> = Vec::new();
     let mut current = String::new();
 
-    for para in content.split("\n\n").map(str::trim).filter(|s| !s.is_empty()) {
+    for para in content
+        .split("\n\n")
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
         let para_len = para.chars().count();
 
         if para_len <= chunk_size {
@@ -85,10 +89,7 @@ fn split_sentences(text: &str) -> Vec<String> {
         let c = chars[i];
         let is_cn_end = matches!(c, '。' | '！' | '？');
         let is_en_end = matches!(c, '.' | '!' | '?')
-            && matches!(
-                chars.get(i + 1),
-                None | Some(' ') | Some('\n') | Some('\r')
-            );
+            && matches!(chars.get(i + 1), None | Some(' ') | Some('\n') | Some('\r'));
 
         if is_cn_end || is_en_end {
             let mut end = i + 1;
@@ -301,7 +302,7 @@ mod tests {
     fn closing_quote_stays_with_sentence() {
         // \u{201D} = RIGHT DOUBLE QUOTATION MARK "
         let s1 = format!("{}\u{3002}\u{201D}", "甲".repeat(349)); // 349甲。"
-        let s2 = format!("{}\u{3002}", "乙".repeat(349));          // 349乙。
+        let s2 = format!("{}\u{3002}", "乙".repeat(349)); // 349乙。
         let para = format!("{}{}", s1, s2);
         let chunks = split(&para, CHUNK_SIZE);
         assert!(chunks[0].text.ends_with('\u{201D}'));

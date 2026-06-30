@@ -63,9 +63,7 @@ pub fn get_reading_position(
     book_id: &str,
 ) -> anyhow::Result<Option<(i64, i64)>> {
     let mut stmt = conn
-        .prepare(
-            "SELECT chapter_index, chunk_index FROM reading_positions WHERE book_id = ?1",
-        )
+        .prepare("SELECT chapter_index, chunk_index FROM reading_positions WHERE book_id = ?1")
         .context("failed to prepare reading position query")?;
 
     let mut rows = stmt
@@ -78,10 +76,7 @@ pub fn get_reading_position(
     }
 }
 
-pub fn upsert_reading_position(
-    conn: &rusqlite::Connection,
-    book_id: &str,
-) -> anyhow::Result<()> {
+pub fn upsert_reading_position(conn: &rusqlite::Connection, book_id: &str) -> anyhow::Result<()> {
     let now = crate::book::model::Timestamp::now().0;
     conn.execute(
         "INSERT OR IGNORE INTO reading_positions (book_id, chapter_index, chunk_index, updated_at)

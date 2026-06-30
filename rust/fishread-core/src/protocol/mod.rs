@@ -3,14 +3,17 @@ pub mod dto;
 use serde::Serialize;
 
 pub use dto::{
-    BookDto, BookListDto, BookRefDto, BookUseDto, ChapterListDto, ImportResultDto, ImportWarningDto,
-    PositionDto, ReaderStateDto,
+    BookDto, BookListDto, BookRefDto, BookUseDto, ChapterListDto, ImportResultDto,
+    ImportWarningDto, PositionDto, ReaderStateDto,
 };
 
 use crate::error::FishReadError;
 
+pub const PROTOCOL_VERSION: u32 = 1;
+
 #[derive(Debug, Serialize)]
 pub struct ApiResponse<T: Serialize> {
+    pub protocol_version: u32,
     pub ok: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub data: Option<T>,
@@ -27,6 +30,7 @@ pub struct ErrorBody {
 impl<T: Serialize> ApiResponse<T> {
     pub fn ok(data: T) -> Self {
         Self {
+            protocol_version: PROTOCOL_VERSION,
             ok: true,
             data: Some(data),
             error: None,
@@ -37,6 +41,7 @@ impl<T: Serialize> ApiResponse<T> {
 impl ApiResponse<()> {
     pub fn err(err: &FishReadError) -> Self {
         Self {
+            protocol_version: PROTOCOL_VERSION,
             ok: false,
             data: None,
             error: Some(ErrorBody {
@@ -48,6 +53,7 @@ impl ApiResponse<()> {
 
     pub fn internal_err(msg: impl Into<String>) -> Self {
         Self {
+            protocol_version: PROTOCOL_VERSION,
             ok: false,
             data: None,
             error: Some(ErrorBody {

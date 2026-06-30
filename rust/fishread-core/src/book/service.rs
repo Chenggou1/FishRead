@@ -37,8 +37,8 @@ impl<'a> LibraryService<'a> {
     }
 
     pub fn list(&self) -> Result<BookListResult, FishReadError> {
-        let rows = book_repo::list_all(self.conn)
-            .map_err(|e| FishReadError::Database(e.to_string()))?;
+        let rows =
+            book_repo::list_all(self.conn).map_err(|e| FishReadError::Database(e.to_string()))?;
 
         let current_id = settings_repo::get_current_book_id(self.conn)
             .map_err(|e| FishReadError::Database(e.to_string()))?;
@@ -69,10 +69,9 @@ impl<'a> LibraryService<'a> {
         book_repo::upsert_reading_position(self.conn, book_id)
             .map_err(|e| FishReadError::Database(e.to_string()))?;
 
-        let (chapter_index, chunk_index) =
-            book_repo::get_reading_position(self.conn, book_id)
-                .map_err(|e| FishReadError::Database(e.to_string()))?
-                .unwrap_or((0, 0));
+        let (chapter_index, chunk_index) = book_repo::get_reading_position(self.conn, book_id)
+            .map_err(|e| FishReadError::Database(e.to_string()))?
+            .unwrap_or((0, 0));
 
         Ok(BookUseResult {
             id: row.id,

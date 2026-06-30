@@ -17,6 +17,10 @@ fn run_ok(c: &mut Command) -> serde_json::Value {
     );
     let json: serde_json::Value =
         serde_json::from_slice(&out.stdout).expect("output is not valid JSON");
+    assert_eq!(
+        json["protocol_version"], 1,
+        "expected protocol version 1, got: {json}"
+    );
     assert_eq!(json["ok"], true, "expected ok:true, got: {json}");
     json
 }
@@ -113,6 +117,7 @@ fn error_book_not_found() {
         .unwrap();
     assert_eq!(out.status.code(), Some(1));
     let j: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(j["protocol_version"], 1);
     assert_eq!(j["ok"], false);
     assert_eq!(j["error"]["code"], "BOOK_NOT_FOUND");
 }
@@ -127,6 +132,7 @@ fn error_database_not_initialized() {
     let out = cmd(db_path).args(["book", "list"]).output().unwrap();
     assert_eq!(out.status.code(), Some(3));
     let j: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(j["protocol_version"], 1);
     assert_eq!(j["ok"], false);
     assert_eq!(j["error"]["code"], "DATABASE_NOT_INITIALIZED");
 }

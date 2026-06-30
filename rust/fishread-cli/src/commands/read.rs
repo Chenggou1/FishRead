@@ -1,7 +1,7 @@
 use fishread_core::error::FishReadError;
 use fishread_core::protocol::{ApiResponse, ReaderStateDto};
-use fishread_core::reader::ReaderService;
 use fishread_core::reader::service::ReaderState;
+use fishread_core::reader::ReaderService;
 use fishread_core::storage::db::StorageDb;
 
 pub fn current() -> (String, i32) {

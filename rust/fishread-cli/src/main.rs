@@ -89,4 +89,3 @@ fn main() {
     println!("{json}");
     std::process::exit(exit_code);
 }
-
