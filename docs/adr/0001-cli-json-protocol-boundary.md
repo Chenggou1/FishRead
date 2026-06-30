@@ -1,0 +1,3 @@
+# Extensions consume FishRead through the CLI JSON Protocol
+
+FishRead UI Packages get runtime data through the FishRead SDK, which invokes the CLI asynchronously and consumes its stable JSON responses; UI Packages and the SDK do not read EPUB files, SQLite storage, or Rust internals directly. Every CLI JSON response includes a top-level integer `protocol_version`, starting at `1`, so UI Packages can identify the compatibility generation of the response independently from FishRead package or crate versions. Business errors remain protocol results returned as `ApiResult<T>`, while CLI execution failures, invalid JSON, and protocol version mismatches are SDK runtime errors.
