@@ -1,4 +1,4 @@
-import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Key } from "@earendil-works/pi-tui";
 import type { Component, TUI } from "@earendil-works/pi-tui";
 import { readCurrent, readNext, readPrev } from "@fishread/sdk";
@@ -7,8 +7,20 @@ import { renderChunk, type ChunkMessageDetails } from "./renderers/chunk.js";
 
 const FR_SUBCOMMANDS = ["next", "prev"] as const;
 const BOSS_KEY = Key.ctrl("q");
+const NEXT_PAGE_KEY = Key.ctrlShift("right");
+const PREV_PAGE_KEY = Key.ctrlShift("left");
+const NEXT_PAGE_KEY_LABEL = "ctrl+shift+right";
+const PREV_PAGE_KEY_LABEL = "ctrl+shift+left";
 const STATUS_KEY = "fishread";
 const WIDGET_KEY = "fishread-reader";
+
+const FR_SUBCOMMAND_DETAILS: Record<
+  (typeof FR_SUBCOMMANDS)[number],
+  { description: string; shortcut: string }
+> = {
+  next: { description: "下一页", shortcut: NEXT_PAGE_KEY_LABEL },
+  prev: { description: "上一页", shortcut: PREV_PAGE_KEY_LABEL },
+};
 
 type FishReadSurfaceId = "status" | "reader";
 
@@ -196,7 +208,7 @@ export default function (pi: ExtensionAPI) {
 
   // ── Navigation ──────────────────────────────────────────────────────────────
 
-  function applyReaderState(ctx: ExtensionCommandContext, result: ApiResponse<ReaderStateDto>) {
+  function applyReaderState(ctx: ExtensionContext, result: ApiResponse<ReaderStateDto>) {
     const { data } = result;
     lastReaderState = data;
     lastStatusText = buildStatusText(data, ctx.ui.theme);
@@ -204,7 +216,7 @@ export default function (pi: ExtensionAPI) {
     bossKey.show(ctx, "reader");
   }
 
-  async function handleNext(ctx: ExtensionCommandContext) {
+  async function handleNext(ctx: ExtensionContext) {
     if (bossKey.isHidden()) return;
 
     const result = await readNext();
@@ -215,7 +227,7 @@ export default function (pi: ExtensionAPI) {
     applyReaderState(ctx, result);
   }
 
-  async function handlePrev(ctx: ExtensionCommandContext) {
+  async function handlePrev(ctx: ExtensionContext) {
     if (bossKey.isHidden()) return;
 
     const result = await readPrev();
@@ -226,12 +238,25 @@ export default function (pi: ExtensionAPI) {
     applyReaderState(ctx, result);
   }
 
+  pi.registerShortcut(NEXT_PAGE_KEY, {
+    description: `FishRead — 下一页 (${NEXT_PAGE_KEY_LABEL})`,
+    handler: handleNext,
+  });
+
+  pi.registerShortcut(PREV_PAGE_KEY, {
+    description: `FishRead — 上一页 (${PREV_PAGE_KEY_LABEL})`,
+    handler: handlePrev,
+  });
+
   pi.registerCommand("fr", {
-    description: "FishRead — /fr <next|prev>",
+    description: `FishRead — /fr <next|prev> (next: ${NEXT_PAGE_KEY_LABEL}, prev: ${PREV_PAGE_KEY_LABEL})`,
     getArgumentCompletions: (prefix) => {
       return FR_SUBCOMMANDS
         .filter((s) => s.startsWith(prefix))
-        .map((s) => ({ value: s, label: s }));
+        .map((s) => ({
+          value: s,
+          label: `${s} — ${FR_SUBCOMMAND_DETAILS[s].description} (${FR_SUBCOMMAND_DETAILS[s].shortcut})`,
+        }));
     },
     handler: async (args, ctx) => {
       if (bossKey.isHidden()) return;
