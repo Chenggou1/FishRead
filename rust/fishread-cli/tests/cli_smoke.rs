@@ -99,10 +99,68 @@ fn smoke_full_workflow() {
     sorted.sort();
     assert_eq!(indices, sorted, "chapters must be sorted by index");
 
+    // --- chapter list --navigation ---
+    let j = run_ok(cmd(db_path).args(["chapter", "list", "--navigation"]));
+    let chapters = j["data"]["chapters"].as_array().unwrap();
+    let first_chapter = &chapters[0];
+    assert_eq!(first_chapter["current"], true);
+    let first_anchors = first_chapter["anchors"].as_array().unwrap();
+    assert!(!first_anchors.is_empty());
+    assert_eq!(first_anchors[0]["label"], "0%");
+    assert_eq!(first_anchors[0]["current"], true);
+    assert_eq!(first_anchors[0]["position"]["chapter_index"], 0);
+    assert_eq!(first_anchors[0]["position"]["chunk_index"], 0);
+    assert_eq!(first_anchors[0]["chunk"]["index"], 0);
+    assert!(!first_anchors[0]["preview"].as_str().unwrap().is_empty());
+    assert!(
+        first_anchors[0]["chunk"]["text"].is_null(),
+        "navigation anchors must not include full chunk text"
+    );
+
+    let jump_anchor = chapters
+        .iter()
+        .flat_map(|chapter| chapter["anchors"].as_array().unwrap().iter())
+        .find(|anchor| anchor["position"]["chunk_index"].as_i64().unwrap() > 0)
+        .unwrap_or(&first_anchors[0]);
+    let jump_chapter = jump_anchor["position"]["chapter_index"]
+        .as_i64()
+        .unwrap()
+        .to_string();
+    let jump_chunk = jump_anchor["position"]["chunk_index"]
+        .as_i64()
+        .unwrap()
+        .to_string();
+
+    // --- read jump ---
+    let j = run_ok(cmd(db_path).args([
+        "read",
+        "jump",
+        "--chapter-index",
+        &jump_chapter,
+        "--chunk-index",
+        &jump_chunk,
+    ]));
+    assert_eq!(
+        j["data"]["progress"]["chapter_index"],
+        jump_chapter.parse::<i64>().unwrap()
+    );
+    assert_eq!(
+        j["data"]["progress"]["chunk_index"],
+        jump_chunk.parse::<i64>().unwrap()
+    );
+    assert!(!j["data"]["chunk"]["text"].as_str().unwrap().is_empty());
+
     // --- read current ---
     let j = run_ok(cmd(db_path).args(["read", "current"]));
     assert!(!j["data"]["chunk"]["text"].as_str().unwrap().is_empty());
-    assert_eq!(j["data"]["start_of_book"], true);
+    assert_eq!(
+        j["data"]["progress"]["chapter_index"].as_i64().unwrap(),
+        jump_chapter.parse::<i64>().unwrap()
+    );
+    assert_eq!(
+        j["data"]["progress"]["chunk_index"].as_i64().unwrap(),
+        jump_chunk.parse::<i64>().unwrap()
+    );
     let ch0 = j["data"]["progress"]["chapter_index"].as_i64().unwrap();
     let ck0 = j["data"]["progress"]["chunk_index"].as_i64().unwrap();
 
@@ -140,6 +198,27 @@ fn error_book_not_found() {
 
     let j = run_err(cmd(db_path).args(["book", "use", "book_nonexistent"]), 1);
     assert_eq!(j["error"]["code"], "BOOK_NOT_FOUND");
+}
+
+#[test]
+fn read_jump_missing_chunk_returns_chunk_not_found() {
+    let db = NamedTempFile::new().unwrap();
+    let db_path = db.path().to_str().unwrap();
+    run_ok(cmd(db_path).arg("init"));
+    run_ok(cmd(db_path).args(["import", FIXTURE]));
+
+    let j = run_err(
+        cmd(db_path).args([
+            "read",
+            "jump",
+            "--chapter-index",
+            "0",
+            "--chunk-index",
+            "9999",
+        ]),
+        1,
+    );
+    assert_eq!(j["error"]["code"], "CHUNK_NOT_FOUND");
 }
 
 #[test]

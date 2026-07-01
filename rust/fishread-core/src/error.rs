@@ -29,6 +29,9 @@ pub enum FishReadError {
     #[error("chapter not found")]
     ChapterNotFound,
 
+    #[error("chunk not found")]
+    ChunkNotFound,
+
     #[error("reading position not found")]
     ReadingPositionNotFound,
 
@@ -57,6 +60,7 @@ impl FishReadError {
             Self::BookNotFound(_) => "BOOK_NOT_FOUND",
             Self::NoCurrentBook => "NO_CURRENT_BOOK",
             Self::ChapterNotFound => "CHAPTER_NOT_FOUND",
+            Self::ChunkNotFound => "CHUNK_NOT_FOUND",
             Self::ReadingPositionNotFound => "READING_POSITION_NOT_FOUND",
             Self::EmptyLibrary => "EMPTY_LIBRARY",
         }

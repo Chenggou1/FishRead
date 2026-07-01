@@ -37,10 +37,15 @@ pub struct ReaderState {
     pub end_of_book: bool,
 }
 
+#[derive(Clone, Copy)]
 enum Direction {
     Stay,
     Next,
     Prev,
+    Jump {
+        chapter_index: i64,
+        chunk_index: i64,
+    },
 }
 
 pub struct ReaderService<'a> {
@@ -64,6 +69,13 @@ impl<'a> ReaderService<'a> {
         self.read(Direction::Prev)
     }
 
+    pub fn jump(&self, chapter_index: i64, chunk_index: i64) -> Result<ReaderState, FishReadError> {
+        self.read(Direction::Jump {
+            chapter_index,
+            chunk_index,
+        })
+    }
+
     fn read(&self, direction: Direction) -> Result<ReaderState, FishReadError> {
         let book_id = settings_repo::get_current_book_id(self.conn)
             .map_err(|e| FishReadError::Database(e.to_string()))?
@@ -76,17 +88,34 @@ impl<'a> ReaderService<'a> {
         let total_chapters = chapter_repo::count(self.conn, &book_id)
             .map_err(|e| FishReadError::Database(e.to_string()))?;
 
-        let (mut chapter_index, mut chunk_index) =
-            book_repo::get_reading_position(self.conn, &book_id)
+        let (mut chapter_index, mut chunk_index) = match direction {
+            Direction::Jump {
+                chapter_index,
+                chunk_index,
+            } => (chapter_index, chunk_index),
+            _ => book_repo::get_reading_position(self.conn, &book_id)
                 .map_err(|e| FishReadError::Database(e.to_string()))?
-                .unwrap_or((0, 0));
+                .unwrap_or((0, 0)),
+        };
+
+        if chapter_index < 0 || chapter_index >= total_chapters as i64 {
+            return Err(FishReadError::ChapterNotFound);
+        }
 
         let mut chapter = chapter_repo::find_by_index(self.conn, &book_id, chapter_index)
             .map_err(|e| FishReadError::Database(e.to_string()))?
             .ok_or(FishReadError::ChapterNotFound)?;
 
         let mut chunks = chunk::split(&chapter.content, chunk::CHUNK_SIZE);
-        let chunk_idx = (chunk_index as usize).min(chunks.len().saturating_sub(1));
+        let chunk_idx = match direction {
+            Direction::Jump { .. } => {
+                if chunk_index < 0 || chunk_index as usize >= chunks.len() {
+                    return Err(FishReadError::ChunkNotFound);
+                }
+                chunk_index as usize
+            }
+            _ => (chunk_index as usize).min(chunks.len().saturating_sub(1)),
+        };
 
         match direction {
             Direction::Stay => {}
@@ -119,6 +148,10 @@ impl<'a> ReaderService<'a> {
                     chunk_index = chunks.len().saturating_sub(1) as i64;
                 }
                 // else: start of book — position unchanged
+                self.save_position(&book_id, chapter_index, chunk_index)?;
+            }
+
+            Direction::Jump { .. } => {
                 self.save_position(&book_id, chapter_index, chunk_index)?;
             }
         }

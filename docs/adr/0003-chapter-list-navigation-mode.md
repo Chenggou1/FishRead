@@ -1,0 +1,3 @@
+# Chapter list owns reading navigation mode
+
+FishRead keeps `chapter list` as the single CLI surface for table-of-contents data and adds an explicit navigation mode for Reading Anchors instead of introducing a separate `read anchors` command. The default chapter list can remain a lightweight publication-structure query, while `chapter list --navigation` may read chapter content, generate chapter-relative anchor labels, include preview text, and support `/fr toc` without exposing a second user-facing directory concept. Jumping remains a reading action: `read jump` changes the Reading Position, returns the same reader state shape as other read commands, and rejects invalid chapter or chunk targets instead of coercing them to nearby locations.

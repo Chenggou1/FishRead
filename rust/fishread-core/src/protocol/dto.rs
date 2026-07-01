@@ -1,7 +1,7 @@
 use serde::Serialize;
 
 use crate::book::service::{BookDeleteResult, BookListResult, BookUseResult};
-use crate::chapter::service::ChapterListResult;
+use crate::chapter::service::{AnchorChunk, AnchorPosition, ChapterListResult, ReadingAnchor};
 use crate::importer::model::{ImportResult, ImportWarning};
 use crate::reader::service::ReaderState;
 
@@ -117,6 +117,25 @@ pub struct ChapterListItemDto {
     pub index: i64,
     pub title: String,
     pub current: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub anchors: Option<Vec<ReadingAnchorDto>>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ReadingAnchorDto {
+    pub label: String,
+    pub chapter_percent: f64,
+    pub current: bool,
+    pub position: PositionDto,
+    pub chunk: AnchorChunkDto,
+    pub preview: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct AnchorChunkDto {
+    pub index: i64,
+    pub is_first: bool,
+    pub is_last: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -140,8 +159,43 @@ impl From<ChapterListResult> for ChapterListDto {
                     index: c.index,
                     title: c.title,
                     current: c.current,
+                    anchors: c
+                        .anchors
+                        .map(|anchors| anchors.into_iter().map(ReadingAnchorDto::from).collect()),
                 })
                 .collect(),
+        }
+    }
+}
+
+impl From<ReadingAnchor> for ReadingAnchorDto {
+    fn from(a: ReadingAnchor) -> Self {
+        Self {
+            label: a.label,
+            chapter_percent: a.chapter_percent,
+            current: a.current,
+            position: PositionDto::from(a.position),
+            chunk: AnchorChunkDto::from(a.chunk),
+            preview: a.preview,
+        }
+    }
+}
+
+impl From<AnchorPosition> for PositionDto {
+    fn from(p: AnchorPosition) -> Self {
+        Self {
+            chapter_index: p.chapter_index,
+            chunk_index: p.chunk_index,
+        }
+    }
+}
+
+impl From<AnchorChunk> for AnchorChunkDto {
+    fn from(c: AnchorChunk) -> Self {
+        Self {
+            index: c.index,
+            is_first: c.is_first,
+            is_last: c.is_last,
         }
     }
 }

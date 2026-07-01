@@ -16,6 +16,10 @@ pub fn prev() -> (String, i32) {
     run(|svc| svc.prev())
 }
 
+pub fn jump(chapter_index: i64, chunk_index: i64) -> (String, i32) {
+    run(|svc| svc.jump(chapter_index, chunk_index))
+}
+
 fn run<F>(f: F) -> (String, i32)
 where
     F: FnOnce(&ReaderService) -> Result<ReaderState, FishReadError>,

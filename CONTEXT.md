@@ -31,3 +31,15 @@ _Avoid_: CLI output, API response shape
 **Protocol Version**:
 The compatibility version of the CLI JSON Protocol, independent from CLI package, npm package, and Rust crate release versions.
 _Avoid_: Package version, crate version, app version
+
+**Reading Position**:
+A location in a book where reading can resume or navigation can land.
+_Avoid_: Cursor, page, offset
+
+**Reading Anchor**:
+A user-facing navigation target inside a chapter that represents a recognizable reading location, maps to a concrete Reading Position, and can be shown with nearby preview text. Reading Anchor labels use chapter-relative percentages.
+_Avoid_: Page, chunk, percent point, table-of-contents item
+
+**Reading Navigation**:
+A user-facing table of contents that keeps the book's chapter structure and adds Reading Anchors under each chapter for finer navigation.
+_Avoid_: Anchor list, chunk list, alternative table of contents
