@@ -63,14 +63,6 @@ function mountWidget(ctx: ExtensionContext) {
 // ── Extension entry ───────────────────────────────────────────────────────────
 
 export default function (pi: ExtensionAPI) {
-  // Filter novel content from LLM context — always active regardless of gate.
-  pi.on("context", async (event, _ctx) => {
-    const filtered = event.messages.filter(
-      (m: any) => m.customType !== "fishread-chunk"
-    );
-    return { messages: filtered };
-  });
-
   // On session start: init status line + mount persistent reading widget.
   pi.on("session_start", async (_event, ctx) => {
     const result = await readCurrent();
