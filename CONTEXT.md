@@ -12,6 +12,14 @@ _Avoid_: Plugin, frontend, consumer
 A FishRead interface package that presents reading workflows to a host environment and depends on the FishRead SDK for runtime data.
 _Avoid_: Frontend, client
 
+**FishRead UI Surface**:
+A visible interface element that FishRead actively contributes to a host environment through a UI Package.
+_Avoid_: Custom UI, frontend element, widget
+
+**Boss Key Hidden State**:
+A FishRead privacy state in which FishRead UI Surfaces are hidden and FishRead interactions are suspended, except for the restore action.
+_Avoid_: Invisible mode, disabled mode, minimized UI
+
 **FishRead SDK**:
 The shared integration surface used by UI Packages to consume FishRead runtime data through the CLI JSON Protocol.
 _Avoid_: UI, extension, runtime

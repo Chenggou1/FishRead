@@ -53,6 +53,7 @@ FishRead is a local EPUB reading runtime. The Rust CLI owns the reading engine a
 - [Issue tracker setup](docs/agents/issue-tracker.md)
 - [Triage label mapping](docs/agents/triage-labels.md)
 - [Domain docs rules](docs/agents/domain.md)
+- [FishRead keybindings](docs/keybindings.md)
 - [Milestones](internal/docs/milestones/)
 - [Architecture reference](internal/docs/references/架构设计.md)
 - [Data model reference](internal/docs/references/数据模型.md)
