@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { homedir } from "node:os";
 import { resolveFishreadPath } from "@fishread/cli";
 import {
   PROTOCOL_VERSION,
@@ -7,6 +8,7 @@ import {
   type BookListDto,
   type BookUseDto,
   type ChapterListDto,
+  type ImportResultDto,
   type ReaderStateDto,
 } from "./types.js";
 
@@ -86,6 +88,13 @@ function isProtocolResult(value: unknown): value is ApiResult<unknown> {
   return false;
 }
 
+function normalizeUserPath(path: string): string {
+  const trimmed = path.trim();
+  if (trimmed === "~") return homedir();
+  if (trimmed.startsWith("~/")) return `${homedir()}${trimmed.slice(1)}`;
+  return trimmed;
+}
+
 export function readCurrent(): Promise<ApiResult<ReaderStateDto>> {
   return run(["read", "current"]) as Promise<ApiResult<ReaderStateDto>>;
 }
@@ -108,6 +117,10 @@ export function useBook(bookId: string): Promise<ApiResult<BookUseDto>> {
 
 export function deleteBook(bookId: string): Promise<ApiResult<BookDeleteDto>> {
   return run(["book", "delete", bookId]) as Promise<ApiResult<BookDeleteDto>>;
+}
+
+export function importBook(path: string): Promise<ApiResult<ImportResultDto>> {
+  return run(["import", normalizeUserPath(path)]) as Promise<ApiResult<ImportResultDto>>;
 }
 
 export function readJump(

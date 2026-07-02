@@ -1,8 +1,11 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { Key, matchesKey, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
+import { Input, Key, matchesKey, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import type { Component, TUI } from "@earendil-works/pi-tui";
+import { readdirSync } from "node:fs";
+import { homedir } from "node:os";
 import {
   deleteBook,
+  importBook,
   listBooks,
   listReadingNavigation,
   readCurrent,
@@ -22,7 +25,7 @@ import type {
 } from "@fishread/sdk";
 import { renderChunk, type ChunkMessageDetails } from "./renderers/chunk.js";
 
-const FR_SUBCOMMANDS = ["next", "prev", "toc", "books"] as const;
+const FR_SUBCOMMANDS = ["next", "prev", "toc", "books", "import"] as const;
 const BOSS_KEY = Key.ctrlShift("h");
 const NEXT_PAGE_KEY = Key.ctrlShift("right");
 const PREV_PAGE_KEY = Key.ctrlShift("left");
@@ -31,6 +34,7 @@ const PREV_PAGE_KEY_LABEL = "ctrl+shift+left";
 const STATUS_KEY = "fishread";
 const WIDGET_KEY = "fishread-reader";
 const DELETE_CONFIRM_TITLE_MAX_WIDTH = 48;
+const IMPORT_SUGGESTION_LIMIT = 6;
 
 const FR_SUBCOMMAND_DETAILS: Record<
   (typeof FR_SUBCOMMANDS)[number],
@@ -40,6 +44,7 @@ const FR_SUBCOMMAND_DETAILS: Record<
   prev: { description: "上一页", shortcut: PREV_PAGE_KEY_LABEL },
   toc: { description: "目录", shortcut: "/fr toc" },
   books: { description: "图书管理", shortcut: "/fr books" },
+  import: { description: "导入 EPUB", shortcut: "/fr import [path]" },
 };
 
 type FishReadSurfaceId = "status" | "reader";
@@ -60,7 +65,7 @@ function buildStatusText(state: ReaderStateDto, theme: any): string {
     theme.fg("dim", ` · ${chapter.title}`) +
     theme.fg(
       "dim",
-      ` · 第 ${chapter.index + 1} 章 · ${progress.chapter_percent.toFixed(0)}% · 全书 ${progress.book_percent.toFixed(0)}%`
+      ` · ${progress.chapter_percent.toFixed(0)}% · 全书 ${progress.book_percent.toFixed(0)}%`
     )
   );
 }
@@ -97,6 +102,49 @@ function clampIndex(index: number, length: number): number {
 
 function isBossKeyOverlayResult<TState>(result: unknown): result is BossKeyOverlayResult<TState> {
   return !!result && typeof result === "object" && (result as { type?: unknown }).type === "boss-key";
+}
+
+function splitCommandArgs(args: string): { subcommand: string; rest: string } {
+  const trimmed = args.trim();
+  if (!trimmed) return { subcommand: "", rest: "" };
+
+  const match = /^(\S+)(?:\s+([\s\S]*))?$/.exec(trimmed);
+  return {
+    subcommand: match?.[1] ?? "",
+    rest: match?.[2]?.trim() ?? "",
+  };
+}
+
+function normalizeImportPath(input: string): string {
+  let path = input.trim();
+  const quoted =
+    (path.startsWith('"') && path.endsWith('"')) || (path.startsWith("'") && path.endsWith("'"));
+  if (quoted && path.length >= 2) {
+    path = path.slice(1, -1).trim();
+  }
+
+  return path;
+}
+
+function expandHomePath(path: string): string {
+  if (path === "~") return homedir();
+  if (path.startsWith("~/")) return `${homedir()}${path.slice(1)}`;
+  return path || ".";
+}
+
+function splitPathForCompletion(path: string): { dirInput: string; namePrefix: string } {
+  if (path === "~") return { dirInput: "~/", namePrefix: "" };
+
+  const lastSlash = path.lastIndexOf("/");
+  if (lastSlash === -1) return { dirInput: "", namePrefix: path };
+  return {
+    dirInput: path.slice(0, lastSlash + 1),
+    namePrefix: path.slice(lastSlash + 1),
+  };
+}
+
+function appendPathEntry(dirInput: string, name: string, directory: boolean): string {
+  return `${dirInput}${name}${directory ? "/" : ""}`;
 }
 
 // Widget Component: reads module-level state on every render call.
@@ -264,7 +312,7 @@ class BookSwitchOverlay implements Component {
       this.theme.fg("dim", truncateToWidth(`格式 ${book.format}`, width)),
       this.theme.fg(
         "dim",
-        truncateToWidth(`进度 第 ${book.position.chapter_index + 1} 章 · ${book.reading_anchor_label}`, width)
+        truncateToWidth(`进度 位置 ${book.position.chapter_index + 1} · ${book.reading_anchor_label}`, width)
       ),
       this.theme.fg("dim", truncateToWidth(`导入 ${importedAt}`, width)),
       "",
@@ -333,7 +381,7 @@ class BookDeleteConfirmOverlay implements Component {
       this.theme.fg("dim", truncateToWidth(this.book.author ? `作者 ${this.book.author}` : "作者未知", contentWidth, "...", true)),
       this.theme.fg(
         "dim",
-        truncateToWidth(`进度 第 ${this.book.position.chapter_index + 1} 章 · ${this.book.reading_anchor_label}`, contentWidth, "...", true)
+        truncateToWidth(`进度 位置 ${this.book.position.chapter_index + 1} · ${this.book.reading_anchor_label}`, contentWidth, "...", true)
       ),
       "",
       this.theme.fg("dim", truncateToWidth("将删除本地书籍、章节和阅读进度。", contentWidth, "...", true)),
@@ -365,6 +413,201 @@ class BookDeleteConfirmOverlay implements Component {
     const text = truncateToWidth(`${prefix}${label}`, width, "", true);
     if (!selected) return this.theme.fg("dim", text);
     return destructive ? this.theme.fg("error", text) : this.theme.fg("accent", text);
+  }
+
+  private padContent(text: string, width: number): string {
+    const visible = visibleWidth(text);
+    const padded = visible < width ? text + " ".repeat(width - visible) : truncateToWidth(text, width, "");
+    return this.theme.fg("dim", "│") + padded + this.theme.fg("dim", "│");
+  }
+}
+
+interface ImportPathOverlayState {
+  path: string;
+  selectedIndex: number;
+}
+
+interface ImportPathSuggestion {
+  value: string;
+  label: string;
+  directory: boolean;
+}
+
+type ImportPathResult = string | BossKeyOverlayResult<ImportPathOverlayState> | undefined;
+
+class ImportPathOverlay implements Component {
+  private readonly input = new Input();
+  private suggestions: ImportPathSuggestion[] = [];
+  private selectedIndex = 0;
+
+  constructor(
+    private theme: any,
+    private tui: TUI,
+    private done: (result: ImportPathResult) => void,
+    initialState?: ImportPathOverlayState
+  ) {
+    this.input.setValue(initialState?.path ?? "");
+    this.selectedIndex = initialState?.selectedIndex ?? 0;
+    this.input.onSubmit = (value) => this.submit(value);
+    this.input.onEscape = () => this.done(undefined);
+    this.refreshSuggestions();
+  }
+
+  handleInput(data: string): void {
+    if (matchesKey(data, BOSS_KEY)) {
+      this.done({ type: "boss-key", state: this.snapshot() });
+      return;
+    }
+    if (matchesKey(data, Key.up)) {
+      this.moveSelection(-1);
+      return;
+    }
+    if (matchesKey(data, Key.down)) {
+      this.moveSelection(1);
+      return;
+    }
+    if (matchesKey(data, Key.tab)) {
+      this.completeSelection();
+      return;
+    }
+    if (matchesKey(data, Key.enter)) {
+      const selected = this.selectedSuggestion();
+      if (selected?.directory) {
+        this.acceptSuggestion(selected);
+        return;
+      }
+      if (selected) {
+        this.submit(selected.value);
+        return;
+      }
+    }
+
+    this.input.handleInput(data);
+    this.refreshSuggestions();
+    this.tui.requestRender();
+  }
+
+  render(width: number): string[] {
+    const contentWidth = Math.max(46, width - 4);
+    const inputWidth = Math.max(16, contentWidth - 7);
+    const inputLine = this.input.render(inputWidth)[0] ?? "";
+    const lines: string[] = [];
+
+    lines.push(this.borderTop(contentWidth));
+    lines.push(this.padContent(this.theme.fg("accent", "FishRead 导入 EPUB"), contentWidth));
+    lines.push(this.separator(contentWidth));
+    lines.push(this.padContent(`${this.theme.fg("dim", "路径 ")}${inputLine}`, contentWidth));
+    lines.push(this.separator(contentWidth));
+
+    if (this.suggestions.length === 0) {
+      lines.push(this.padContent(this.theme.fg("dim", "没有匹配的目录或 EPUB 文件"), contentWidth));
+    } else {
+      for (let i = 0; i < IMPORT_SUGGESTION_LIMIT; i++) {
+        const suggestion = this.suggestions[i];
+        lines.push(this.padContent(this.renderSuggestion(suggestion, i, contentWidth), contentWidth));
+      }
+    }
+
+    lines.push(this.separator(contentWidth));
+    lines.push(this.padContent(this.footerText(contentWidth), contentWidth));
+    lines.push(this.borderBottom(contentWidth));
+    return lines;
+  }
+
+  invalidate() {}
+
+  private submit(value: string): void {
+    const path = normalizeImportPath(value);
+    this.done(path || undefined);
+  }
+
+  private snapshot(): ImportPathOverlayState {
+    return {
+      path: this.input.getValue(),
+      selectedIndex: this.selectedIndex,
+    };
+  }
+
+  private moveSelection(delta: number): void {
+    if (this.suggestions.length === 0) return;
+    this.selectedIndex = Math.max(0, Math.min(this.suggestions.length - 1, this.selectedIndex + delta));
+    this.tui.requestRender();
+  }
+
+  private completeSelection(): void {
+    this.refreshSuggestions();
+    const selected = this.selectedSuggestion();
+    if (!selected) {
+      this.tui.requestRender();
+      return;
+    }
+
+    this.acceptSuggestion(selected);
+  }
+
+  private acceptSuggestion(suggestion: ImportPathSuggestion): void {
+    this.input.setValue(suggestion.value);
+    this.refreshSuggestions();
+    this.tui.requestRender();
+  }
+
+  private selectedSuggestion(): ImportPathSuggestion | undefined {
+    return this.suggestions[this.selectedIndex];
+  }
+
+  private refreshSuggestions(): void {
+    const input = normalizeImportPath(this.input.getValue());
+    const { dirInput, namePrefix } = splitPathForCompletion(input);
+    const fsDir = expandHomePath(dirInput);
+    const prefix = namePrefix.toLocaleLowerCase();
+    const includeHidden = namePrefix.startsWith(".");
+
+    try {
+      this.suggestions = readdirSync(fsDir, { withFileTypes: true })
+        .filter((entry) => includeHidden || !entry.name.startsWith("."))
+        .filter((entry) => entry.name.toLocaleLowerCase().startsWith(prefix))
+        .filter((entry) => entry.isDirectory() || entry.name.toLocaleLowerCase().endsWith(".epub"))
+        .sort((a, b) => {
+          if (a.isDirectory() !== b.isDirectory()) return a.isDirectory() ? -1 : 1;
+          return a.name.localeCompare(b.name);
+        })
+        .slice(0, IMPORT_SUGGESTION_LIMIT)
+        .map((entry) => ({
+          value: appendPathEntry(dirInput, entry.name, entry.isDirectory()),
+          label: entry.name,
+          directory: entry.isDirectory(),
+        }));
+    } catch {
+      this.suggestions = [];
+    }
+
+    this.selectedIndex = clampIndex(this.selectedIndex, this.suggestions.length);
+  }
+
+  private renderSuggestion(suggestion: ImportPathSuggestion | undefined, row: number, width: number): string {
+    if (!suggestion) return "";
+
+    const selected = row === this.selectedIndex;
+    const prefix = selected ? "› " : "  ";
+    const kind = suggestion.directory ? "[目录]" : "[EPUB]";
+    const text = truncateToWidth(`${prefix}${kind} ${suggestion.label}`, width, "", true);
+    return selected ? this.theme.fg("accent", text) : this.theme.fg("dim", text);
+  }
+
+  private footerText(width: number): string {
+    return this.theme.fg("dim", truncateToWidth("Tab 补全 · ↑↓ 选择 · Enter 导入 · Esc 取消", width));
+  }
+
+  private borderTop(width: number): string {
+    return this.theme.fg("dim", `┌${"─".repeat(width)}┐`);
+  }
+
+  private borderBottom(width: number): string {
+    return this.theme.fg("dim", `└${"─".repeat(width)}┘`);
+  }
+
+  private separator(width: number): string {
+    return this.theme.fg("dim", `├${"─".repeat(width)}┤`);
   }
 
   private padContent(text: string, width: number): string {
@@ -534,7 +777,7 @@ class TocOverlay implements Component {
   private renderChapterItem(chapter: ChapterListItemDto, selected: boolean, width: number): string {
     const marker = chapter.current ? "◆" : " ";
     const prefix = selected && this.activePane === "chapter" ? "›" : " ";
-    const raw = `${prefix} ${marker} 第 ${chapter.index + 1} 章 ${chapter.title}`;
+    const raw = `${prefix} ${marker} ${chapter.title}`;
     const text = truncateToWidth(raw, width - 2, "", true);
     return selected ? this.theme.fg("accent", text) : this.theme.fg("dim", text);
   }
@@ -891,6 +1134,58 @@ export default function (pi: ExtensionAPI) {
     }
   }
 
+  async function handleImport(ctx: ExtensionContext, pathArg?: string, initialState?: ImportPathOverlayState) {
+    if (bossKey.isHidden()) return;
+
+    let rawPath = pathArg && pathArg.trim() ? pathArg : undefined;
+    if (!rawPath) {
+      if (ctx.mode !== "tui") {
+        rawPath = await ctx.ui.input("FishRead 导入", "输入 EPUB 文件路径");
+      } else {
+        const selection = await ctx.ui.custom<ImportPathResult>(
+          (tui, theme, _kb, done) => new ImportPathOverlay(theme, tui, done, initialState),
+          {
+            overlay: true,
+            overlayOptions: {
+              width: "68%",
+              minWidth: 52,
+              maxHeight: 14,
+              anchor: "center",
+              margin: 2,
+            },
+          }
+        );
+        if (isBossKeyOverlayResult<ImportPathOverlayState>(selection)) {
+          bossKey.hideWithOverlayRestore(ctx, () => handleImport(ctx, undefined, selection.state));
+          return;
+        }
+        rawPath = selection;
+      }
+    }
+
+    if (!rawPath) return;
+
+    const importPath = normalizeImportPath(rawPath);
+    if (!importPath) return;
+
+    const result = await importBook(importPath);
+    if (!result.ok) {
+      ctx.ui.notify(`[fishread] ${result.error.code}: ${result.error.message}`, "error");
+      return;
+    }
+
+    const warningText =
+      result.data.warnings.length > 0 ? `，${result.data.warnings.length} 个警告` : "";
+    ctx.ui.notify(
+      `[fishread] 已导入《${result.data.book.title}》，${result.data.chapters_count} 个可读项${warningText}`,
+      "info"
+    );
+
+    await reloadReaderState(ctx);
+    bossKey.show(ctx, "status");
+    bossKey.show(ctx, "reader");
+  }
+
   pi.registerShortcut(NEXT_PAGE_KEY, {
     description: `FishRead — 下一页 (${NEXT_PAGE_KEY_LABEL})`,
     handler: handleNext,
@@ -902,7 +1197,7 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.registerCommand("fr", {
-    description: `FishRead — /fr <next|prev|toc|books> (next: ${NEXT_PAGE_KEY_LABEL}, prev: ${PREV_PAGE_KEY_LABEL})`,
+    description: `FishRead — /fr <next|prev|toc|books|import> (next: ${NEXT_PAGE_KEY_LABEL}, prev: ${PREV_PAGE_KEY_LABEL})`,
     getArgumentCompletions: (prefix) => {
       return FR_SUBCOMMANDS
         .filter((s) => s.startsWith(prefix))
@@ -914,15 +1209,16 @@ export default function (pi: ExtensionAPI) {
     handler: async (args, ctx) => {
       if (bossKey.isHidden()) return;
 
-      const [sub] = args.trim().split(/\s+/);
-      switch (sub) {
+      const { subcommand, rest } = splitCommandArgs(args);
+      switch (subcommand) {
         case "next": return handleNext(ctx);
         case "prev": return handlePrev(ctx);
         case "toc": return handleToc(ctx);
         case "books": return handleBooks(ctx);
+        case "import": return handleImport(ctx, rest);
         default:
           ctx.ui.notify(
-            `未知子命令: ${sub || "(空)"}。可用: ${FR_SUBCOMMANDS.join(", ")}`,
+            `未知子命令: ${subcommand || "(空)"}。可用: ${FR_SUBCOMMANDS.join(", ")}`,
             "error"
           );
       }

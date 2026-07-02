@@ -21,6 +21,18 @@ export interface BookDto {
   format: string;
 }
 
+export interface ImportWarningDto {
+  code: string;
+  message: string;
+}
+
+export interface ImportResultDto {
+  book: BookDto;
+  chapters_count: number;
+  current: boolean;
+  warnings: ImportWarningDto[];
+}
+
 export interface BookListItemDto {
   id: string;
   title: string;
