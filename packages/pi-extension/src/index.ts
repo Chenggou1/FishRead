@@ -14,7 +14,7 @@ import type {
 import { renderChunk, type ChunkMessageDetails } from "./renderers/chunk.js";
 
 const FR_SUBCOMMANDS = ["next", "prev", "toc", "books"] as const;
-const BOSS_KEY = Key.ctrl("q");
+const BOSS_KEY = Key.ctrlShift("h");
 const NEXT_PAGE_KEY = Key.ctrlShift("right");
 const PREV_PAGE_KEY = Key.ctrlShift("left");
 const NEXT_PAGE_KEY_LABEL = "ctrl+shift+right";

@@ -6,7 +6,7 @@ FishRead keybindings are part of the Pi UI Package contract. They should be easy
 
 | Action | Key | Scope | Notes |
 | ---- | ---- | ---- | ---- |
-| Boss key | `ctrl+q` | Pi extension | Toggles the Boss Key Hidden State. This is the only FishRead interaction that remains active while hidden. |
+| Boss key | `ctrl+shift+h` | Pi extension | Toggles the Boss Key Hidden State. This is the only FishRead interaction that remains active while hidden. |
 | Next page | `ctrl+shift+right` | Pi extension | Advances to the next reading chunk. Disabled while FishRead is hidden. |
 | Previous page | `ctrl+shift+left` | Pi extension | Returns to the previous reading chunk. Disabled while FishRead is hidden. |
 
@@ -20,7 +20,7 @@ FishRead keybindings are part of the Pi UI Package contract. They should be easy
 
 ## Customization
 
-Pi keybindings can be customized in `~/.pi/agent/keybindings.json`, then reloaded with `/reload` in Pi. If a terminal reserves `ctrl+q`, rebind the FishRead boss key before relying on it.
+Pi keybindings can be customized in `~/.pi/agent/keybindings.json`, then reloaded with `/reload` in Pi.
 
 ## Change checklist
 
