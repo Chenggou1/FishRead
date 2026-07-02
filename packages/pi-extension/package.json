@@ -1,6 +1,6 @@
 {
   "name": "@fishread/pi-extension",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "description": "FishRead Pi extension — read EPUB in the conversation thread",
   "main": "dist/index.js",
