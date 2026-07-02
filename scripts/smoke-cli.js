@@ -6,7 +6,7 @@
  * Usage: node scripts/smoke-cli.js
  */
 import { spawnSync } from "node:child_process";
-import { existsSync, copyFileSync, chmodSync } from "node:fs";
+import { existsSync, copyFileSync, chmodSync, mkdirSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -65,6 +65,7 @@ if (existsSync(pkgDir) && devBinaryExists) {
   const platformBin = resolve(pkgDir, "bin", binName);
 
   try {
+    mkdirSync(dirname(platformBin), { recursive: true });
     copyFileSync(devBinary, platformBin);
     if (platform !== "win32") chmodSync(platformBin, 0o755);
     check(`platform package binary staged (${pkgName}/bin/${binName})`, existsSync(platformBin));
