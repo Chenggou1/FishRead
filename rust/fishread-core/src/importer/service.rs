@@ -6,7 +6,7 @@ use crate::error::FishReadError;
 use crate::storage::{import_repo, settings_repo};
 
 use super::epub::EpubImporter;
-use super::model::ImportResult;
+use super::model::{ImportResult, NormalizedChapter};
 use super::BookImporter;
 
 pub struct ImportService<'a> {
@@ -39,18 +39,7 @@ impl<'a> ImportService<'a> {
             updated_at: now,
         };
 
-        let chapters: Vec<Chapter> = normalized
-            .chapters
-            .iter()
-            .map(|nc| Chapter {
-                id: ChapterId::new(),
-                book_id: book_id.clone(),
-                index: ChapterIndex(nc.source_index as i64),
-                title: nc.title.clone(),
-                content: nc.content.clone(),
-                source_path: nc.source_path.clone(),
-            })
-            .collect();
+        let chapters = build_chapters(&book_id, &normalized.chapters);
 
         let chapters_count = chapters.len();
 
@@ -70,5 +59,52 @@ impl<'a> ImportService<'a> {
             current: set_as_current,
             warnings: normalized.warnings,
         })
+    }
+}
+
+fn build_chapters(book_id: &BookId, normalized_chapters: &[NormalizedChapter]) -> Vec<Chapter> {
+    normalized_chapters
+        .iter()
+        .enumerate()
+        .map(|(chapter_index, nc)| Chapter {
+            id: ChapterId::new(),
+            book_id: book_id.clone(),
+            index: ChapterIndex(chapter_index as i64),
+            title: nc.title.clone(),
+            content: nc.content.clone(),
+            source_path: nc.source_path.clone(),
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn build_chapters_compresses_source_indices() {
+        let book_id = BookId::new();
+        let normalized = vec![
+            normalized_chapter(1, "First readable"),
+            normalized_chapter(4, "Second readable"),
+            normalized_chapter(5, "Third readable"),
+        ];
+
+        let chapters = build_chapters(&book_id, &normalized);
+        let indices: Vec<i64> = chapters.iter().map(|ch| ch.index.0).collect();
+
+        assert_eq!(indices, vec![0, 1, 2]);
+        assert_eq!(chapters[0].source_path.as_deref(), Some("chapter-1.xhtml"));
+        assert_eq!(chapters[1].source_path.as_deref(), Some("chapter-4.xhtml"));
+        assert_eq!(chapters[2].source_path.as_deref(), Some("chapter-5.xhtml"));
+    }
+
+    fn normalized_chapter(source_index: usize, title: &str) -> NormalizedChapter {
+        NormalizedChapter {
+            source_index,
+            source_path: Some(format!("chapter-{source_index}.xhtml")),
+            title: title.to_owned(),
+            content: format!("Content for {title}"),
+        }
     }
 }

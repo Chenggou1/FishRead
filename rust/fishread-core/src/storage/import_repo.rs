@@ -51,11 +51,12 @@ pub fn import_book(
         .with_context(|| format!("failed to insert chapter index {}", ch.index.0))?;
     }
 
+    let initial_chapter_index = chapters.first().map(|ch| ch.index.0).unwrap_or(0);
     let now = Timestamp::now().0;
     tx.execute(
         "INSERT INTO reading_positions (book_id, chapter_index, chunk_index, updated_at)
-         VALUES (?1, 0, 0, ?2)",
-        params![book.id.0, now],
+         VALUES (?1, ?2, 0, ?3)",
+        params![book.id.0, initial_chapter_index, now],
     )
     .context("failed to insert reading position")?;
 
