@@ -4,6 +4,7 @@ use crate::book::service::{BookDeleteResult, BookListResult, BookUseResult};
 use crate::chapter::service::{AnchorChunk, AnchorPosition, ChapterListResult, ReadingAnchor};
 use crate::importer::model::{ImportResult, ImportWarning};
 use crate::reader::service::ReaderState;
+use crate::storage::migrations::{MigrationInfo, MigrationRun, MigrationStatus};
 
 #[derive(Debug, Serialize)]
 pub struct BookDto {
@@ -48,6 +49,73 @@ impl From<ImportWarning> for ImportWarningDto {
         Self {
             code: w.code,
             message: w.message,
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct MigrationInfoDto {
+    pub version: i64,
+    pub name: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct MigrationRunDto {
+    pub database_path: String,
+    pub applied: Vec<MigrationInfoDto>,
+    pub current_version: i64,
+    pub latest_version: i64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct MigrationStatusDto {
+    pub database_path: String,
+    pub applied: Vec<MigrationInfoDto>,
+    pub pending: Vec<MigrationInfoDto>,
+    pub current_version: i64,
+    pub latest_version: i64,
+}
+
+impl MigrationRunDto {
+    pub fn from_run(database_path: String, run: MigrationRun) -> Self {
+        Self {
+            database_path,
+            applied: run
+                .applied
+                .into_iter()
+                .map(MigrationInfoDto::from)
+                .collect(),
+            current_version: run.current_version,
+            latest_version: run.latest_version,
+        }
+    }
+}
+
+impl MigrationStatusDto {
+    pub fn from_status(database_path: String, status: MigrationStatus) -> Self {
+        Self {
+            database_path,
+            applied: status
+                .applied
+                .into_iter()
+                .map(MigrationInfoDto::from)
+                .collect(),
+            pending: status
+                .pending
+                .into_iter()
+                .map(MigrationInfoDto::from)
+                .collect(),
+            current_version: status.current_version,
+            latest_version: status.latest_version,
+        }
+    }
+}
+
+impl From<MigrationInfo> for MigrationInfoDto {
+    fn from(m: MigrationInfo) -> Self {
+        Self {
+            version: m.version,
+            name: m.name,
         }
     }
 }

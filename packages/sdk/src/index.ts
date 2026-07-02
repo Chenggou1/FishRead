@@ -9,6 +9,7 @@ import {
   type BookUseDto,
   type ChapterListDto,
   type ImportResultDto,
+  type MigrationRunDto,
   type ReaderStateDto,
 } from "./types.js";
 
@@ -21,7 +22,9 @@ export class FishReadSdkError extends Error {
   }
 }
 
-async function run(args: string[]): Promise<ApiResult<unknown>> {
+let readiness: Promise<ApiResult<MigrationRunDto>> | undefined;
+
+async function runRaw(args: string[]): Promise<ApiResult<unknown>> {
   const bin = resolveFishreadPath();
   const child = spawn(bin, args, { stdio: ["ignore", "pipe", "pipe"] });
 
@@ -54,6 +57,15 @@ async function run(args: string[]): Promise<ApiResult<unknown>> {
   }
 
   return parsed;
+}
+
+async function run(args: string[]): Promise<ApiResult<unknown>> {
+  const ready = await ensureFishReadReady();
+  if (!ready.ok) {
+    return ready;
+  }
+
+  return runRaw(args);
 }
 
 function isProtocolResult(value: unknown): value is ApiResult<unknown> {
@@ -93,6 +105,29 @@ function normalizeUserPath(path: string): string {
   if (trimmed === "~") return homedir();
   if (trimmed.startsWith("~/")) return `${homedir()}${trimmed.slice(1)}`;
   return trimmed;
+}
+
+export function migrate(): Promise<ApiResult<MigrationRunDto>> {
+  return runRaw(["migrate"]) as Promise<ApiResult<MigrationRunDto>>;
+}
+
+export function ensureFishReadReady(): Promise<ApiResult<MigrationRunDto>> {
+  if (!readiness) {
+    readiness = migrate().then(
+      (result) => {
+        if (!result.ok) {
+          readiness = undefined;
+        }
+        return result;
+      },
+      (err) => {
+        readiness = undefined;
+        throw err;
+      }
+    );
+  }
+
+  return readiness;
 }
 
 export function readCurrent(): Promise<ApiResult<ReaderStateDto>> {

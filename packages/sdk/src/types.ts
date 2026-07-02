@@ -33,6 +33,18 @@ export interface ImportResultDto {
   warnings: ImportWarningDto[];
 }
 
+export interface MigrationInfoDto {
+  version: number;
+  name: string;
+}
+
+export interface MigrationRunDto {
+  database_path: string;
+  applied: MigrationInfoDto[];
+  current_version: number;
+  latest_version: number;
+}
+
 export interface BookListItemDto {
   id: string;
   title: string;

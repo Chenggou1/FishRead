@@ -20,6 +20,12 @@ enum Command {
         path: String,
     },
 
+    /// Run database migrations
+    Migrate {
+        #[command(subcommand)]
+        sub: Option<MigrateCommand>,
+    },
+
     /// Manage books in the library
     Book {
         #[command(subcommand)]
@@ -37,6 +43,12 @@ enum Command {
         #[command(subcommand)]
         sub: ReadCommand,
     },
+}
+
+#[derive(Debug, Subcommand)]
+enum MigrateCommand {
+    /// Show migration status without applying changes
+    Status,
 }
 
 #[derive(Debug, Subcommand)]
@@ -90,6 +102,10 @@ fn main() {
     let (json, exit_code) = match cli.command {
         Command::Init => commands::init::run(),
         Command::Import { path } => commands::import::run(&path),
+        Command::Migrate { sub } => match sub {
+            None => commands::migrate::run(),
+            Some(MigrateCommand::Status) => commands::migrate::status(),
+        },
         Command::Book { sub } => match sub {
             BookCommand::List => commands::book::list(),
             BookCommand::Use { book_id } => commands::book::use_book(&book_id),

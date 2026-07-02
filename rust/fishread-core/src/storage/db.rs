@@ -4,6 +4,7 @@ use anyhow::Context;
 use rusqlite::Connection;
 
 use crate::error::FishReadError;
+use crate::storage::migrations::MigrationRun;
 
 #[derive(Debug)]
 pub struct StorageDb {
@@ -31,16 +32,21 @@ impl StorageDb {
     /// Used by `fishread init`: creates the data directory + database file, runs migrations.
     /// Idempotent — safe to call multiple times.
     pub fn init() -> anyhow::Result<(Self, String)> {
+        Self::migrate().map(|(db, db_path, _run)| (db, db_path))
+    }
+
+    /// Creates the data directory + database file if needed, then runs pending migrations.
+    pub fn migrate() -> anyhow::Result<(Self, String, MigrationRun)> {
         let path = resolve_db_path()?;
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)
                 .with_context(|| format!("failed to create data dir: {}", parent.display()))?;
         }
-        let conn = Connection::open(&path)
+        let mut conn = Connection::open(&path)
             .with_context(|| format!("failed to open database at {}", path.display()))?;
-        super::migrations::run(&conn)?;
+        let run = super::migrations::run(&mut conn)?;
         let db_path_str = path.to_string_lossy().into_owned();
-        Ok((Self { conn }, db_path_str))
+        Ok((Self { conn }, db_path_str, run))
     }
 
     /// Used by all commands other than `init`: opens an existing database.
@@ -106,7 +112,7 @@ mod tests {
         assert!(db_path.exists(), "database file should be created");
         assert_eq!(returned_path, db_path.to_str().unwrap());
 
-        // Verify all four tables exist.
+        // Verify all app tables and migration metadata exist.
         let conn = Connection::open(&db_path).unwrap();
         let tables: Vec<String> = {
             let mut stmt = conn
@@ -119,7 +125,13 @@ mod tests {
         };
         assert_eq!(
             tables,
-            ["books", "chapters", "reading_positions", "settings"]
+            [
+                "_fishread_migrations",
+                "books",
+                "chapters",
+                "reading_positions",
+                "settings"
+            ]
         );
     }
 
@@ -136,6 +148,25 @@ mod tests {
         std::env::remove_var("FISHREAD_DB_PATH");
 
         assert!(result.is_ok(), "second init should succeed: {:?}", result);
+    }
+
+    #[test]
+    fn migrate_reports_only_pending_migrations() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("fishread.db");
+        std::env::set_var("FISHREAD_DB_PATH", db_path.to_str().unwrap());
+
+        let (_db, _returned_path, first_run) = StorageDb::migrate().unwrap();
+        let (_db, _returned_path, second_run) = StorageDb::migrate().unwrap();
+        std::env::remove_var("FISHREAD_DB_PATH");
+
+        assert_eq!(first_run.applied.len(), 1);
+        assert_eq!(first_run.current_version, 1);
+        assert_eq!(first_run.latest_version, 1);
+        assert!(second_run.applied.is_empty());
+        assert_eq!(second_run.current_version, 1);
+        assert_eq!(second_run.latest_version, 1);
     }
 
     #[test]

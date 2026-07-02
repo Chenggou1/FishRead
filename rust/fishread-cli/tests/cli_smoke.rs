@@ -48,6 +48,19 @@ fn count_rows(db_path: &str, sql: &str, value: &str) -> i64 {
     conn.query_row(sql, [value], |row| row.get(0)).unwrap()
 }
 
+fn table_exists(db_path: &str, table: &str) -> bool {
+    let conn = rusqlite::Connection::open(db_path).unwrap();
+    conn.query_row(
+        "SELECT EXISTS (
+            SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1
+        )",
+        [table],
+        |row| row.get::<_, i64>(0),
+    )
+    .unwrap()
+        == 1
+}
+
 const FIXTURE: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../fixtures/epub/multi-chapter.epub"
@@ -56,6 +69,34 @@ const SIMPLE_FIXTURE: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../fixtures/epub/simple.epub"
 );
+
+#[test]
+fn migrate_runs_pending_migrations_and_reports_status() {
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("fishread.db");
+    let db_path = db_path.to_str().unwrap();
+
+    let j = run_ok(cmd(db_path).arg("migrate"));
+    assert_eq!(j["data"]["database_path"], db_path);
+    assert_eq!(j["data"]["current_version"], 1);
+    assert_eq!(j["data"]["latest_version"], 1);
+    assert_eq!(j["data"]["applied"].as_array().unwrap().len(), 1);
+    assert_eq!(j["data"]["applied"][0]["version"], 1);
+    assert_eq!(j["data"]["applied"][0]["name"], "init");
+    assert!(table_exists(db_path, "_fishread_migrations"));
+    assert!(table_exists(db_path, "books"));
+
+    let j = run_ok(cmd(db_path).arg("migrate"));
+    assert_eq!(j["data"]["current_version"], 1);
+    assert_eq!(j["data"]["latest_version"], 1);
+    assert!(j["data"]["applied"].as_array().unwrap().is_empty());
+
+    let j = run_ok(cmd(db_path).args(["migrate", "status"]));
+    assert_eq!(j["data"]["current_version"], 1);
+    assert_eq!(j["data"]["latest_version"], 1);
+    assert_eq!(j["data"]["applied"].as_array().unwrap().len(), 1);
+    assert!(j["data"]["pending"].as_array().unwrap().is_empty());
+}
 
 #[test]
 fn smoke_full_workflow() {

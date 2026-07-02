@@ -2,6 +2,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import type { Component, TUI } from "@earendil-works/pi-tui";
 import {
   deleteBook,
+  ensureFishReadReady,
   importBook,
   listBooks,
   listReadingNavigation,
@@ -205,6 +206,15 @@ bossKey.register({
 
 export default function (pi: ExtensionAPI) {
   pi.on("session_start", async (_event, ctx) => {
+    const ready = await ensureFishReadReady();
+    if (!ready.ok) {
+      lastReaderState = undefined;
+      lastStatusText = ctx.ui.theme.fg("dim", "◆ FishRead · 数据库准备失败");
+      ctx.ui.notify(`[fishread] ${ready.error.code}: ${ready.error.message}`, "error");
+      bossKey.show(ctx, "status");
+      return;
+    }
+
     await reloadReaderState(ctx);
     bossKey.show(ctx, "status");
     bossKey.show(ctx, "reader");
