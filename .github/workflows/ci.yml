@@ -66,5 +66,8 @@ jobs:
       - name: Check
         run: pnpm run check
 
+      - name: Build Rust CLI for smoke test
+        run: cargo build --manifest-path rust/Cargo.toml -p fishread-cli --bin fishread
+
       - name: Smoke test
         run: pnpm run smoke
