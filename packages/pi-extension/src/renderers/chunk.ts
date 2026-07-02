@@ -8,9 +8,9 @@ export interface ChunkMessageDetails {
 export function renderChunk(
   content: string,
   _details: ChunkMessageDetails,
-  theme: any
+  _theme: any
 ): any {
-  const body = theme.fg("text", content);
+  const body = content;
   const box = new Box(0, 0);
   box.addChild(new Text(body, 0, 0));
 
