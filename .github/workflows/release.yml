@@ -1,0 +1,143 @@
+name: Release
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: "Git ref/tag to publish"
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Git ref/tag to publish, for example v0.1.1"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            runner: macos-14
+            npm_pkg: cli-darwin-arm64
+            binary: fishread
+          - target: x86_64-apple-darwin
+            runner: macos-15-intel
+            npm_pkg: cli-darwin-x64
+            binary: fishread
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-latest
+            npm_pkg: cli-linux-x64
+            binary: fishread
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-latest
+            npm_pkg: cli-linux-arm64
+            binary: fishread
+            use_cross: true
+          - target: x86_64-pc-windows-msvc
+            runner: windows-latest
+            npm_pkg: cli-win32-x64
+            binary: fishread.exe
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Install Rust target
+        run: rustup target add ${{ matrix.target }}
+
+      - name: Install cross (Linux ARM64 only)
+        if: matrix.use_cross
+        run: cargo install cross --git https://github.com/cross-rs/cross
+
+      - name: Build (native)
+        if: ${{ !matrix.use_cross }}
+        run: cargo build --manifest-path rust/Cargo.toml -p fishread-cli --release --target ${{ matrix.target }}
+
+      - name: Build (cross)
+        if: matrix.use_cross
+        run: cross build --manifest-path rust/Cargo.toml -p fishread-cli --release --target ${{ matrix.target }}
+
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.npm_pkg }}
+          path: rust/target/${{ matrix.target }}/release/${{ matrix.binary }}
+          if-no-files-found: error
+
+  publish:
+    name: Publish to npm
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Install pnpm
+        run: corepack enable && corepack prepare pnpm@9.15.4 --activate
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: https://registry.npmjs.org
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Download binaries
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Place binaries into platform packages
+        shell: bash
+        run: |
+          for pkg in cli-darwin-arm64 cli-darwin-x64 cli-linux-arm64 cli-linux-x64; do
+            mkdir -p packages/$pkg/bin
+            cp artifacts/$pkg/fishread packages/$pkg/bin/fishread
+            chmod +x packages/$pkg/bin/fishread
+          done
+          mkdir -p packages/cli-win32-x64/bin
+          cp artifacts/cli-win32-x64/fishread.exe packages/cli-win32-x64/bin/fishread.exe
+
+      - name: Publish platform packages
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          for pkg in cli-darwin-arm64 cli-darwin-x64 cli-linux-arm64 cli-linux-x64 cli-win32-x64; do
+            pnpm --filter @fishread/$pkg publish --access public --provenance --no-git-checks
+          done
+
+      - name: Publish @fishread/cli
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: pnpm --filter @fishread/cli publish --access public --provenance --no-git-checks
+
+      - name: Build @fishread/sdk
+        run: pnpm --filter @fishread/sdk run build
+
+      - name: Publish @fishread/sdk
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: pnpm --filter @fishread/sdk publish --access public --provenance --no-git-checks
+
+      - name: Build @fishread/pi-extension
+        run: pnpm --filter @fishread/pi-extension run build
+
+      - name: Publish @fishread/pi-extension
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: pnpm --filter @fishread/pi-extension publish --access public --provenance --no-git-checks

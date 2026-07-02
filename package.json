@@ -1,6 +1,8 @@
 {
   "name": "fishread",
+  "version": "0.1.0",
   "private": true,
+  "packageManager": "pnpm@9.15.4",
   "type": "module",
   "scripts": {
     "build": "pnpm run build:rust && pnpm run build:js",
