@@ -1,11 +1,17 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { Key } from "@earendil-works/pi-tui";
+import { Key, matchesKey, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import type { Component, TUI } from "@earendil-works/pi-tui";
-import { readCurrent, readNext, readPrev } from "@fishread/sdk";
-import type { ApiResponse, ReaderStateDto } from "@fishread/sdk";
+import { listReadingNavigation, readCurrent, readJump, readNext, readPrev } from "@fishread/sdk";
+import type {
+  ApiResponse,
+  ChapterListDto,
+  ChapterListItemDto,
+  ReaderStateDto,
+  ReadingAnchorDto,
+} from "@fishread/sdk";
 import { renderChunk, type ChunkMessageDetails } from "./renderers/chunk.js";
 
-const FR_SUBCOMMANDS = ["next", "prev"] as const;
+const FR_SUBCOMMANDS = ["next", "prev", "toc"] as const;
 const BOSS_KEY = Key.ctrl("q");
 const NEXT_PAGE_KEY = Key.ctrlShift("right");
 const PREV_PAGE_KEY = Key.ctrlShift("left");
@@ -20,6 +26,7 @@ const FR_SUBCOMMAND_DETAILS: Record<
 > = {
   next: { description: "下一页", shortcut: NEXT_PAGE_KEY_LABEL },
   prev: { description: "上一页", shortcut: PREV_PAGE_KEY_LABEL },
+  toc: { description: "目录", shortcut: "/fr toc" },
 };
 
 type FishReadSurfaceId = "status" | "reader";
@@ -83,6 +90,196 @@ class ChunkWidget implements Component {
   }
 
   invalidate() {}
+}
+
+interface NavigationSelection {
+  chapterIndex: number;
+  chunkIndex: number;
+}
+
+class TocOverlay implements Component {
+  private readonly chapters: ChapterListItemDto[];
+  private selectedChapterIndex: number;
+  private selectedAnchorIndex: number;
+  private activePane: "chapter" | "anchor" = "chapter";
+  private chapterTopIndex = 0;
+
+  constructor(
+    navigation: ChapterListDto,
+    private theme: any,
+    private tui: TUI,
+    private done: (selection: NavigationSelection | undefined) => void
+  ) {
+    this.chapters = navigation.chapters;
+    this.selectedChapterIndex = Math.max(
+      0,
+      navigation.chapters.findIndex((chapter) => chapter.current)
+    );
+    this.selectedAnchorIndex = this.defaultAnchorIndex();
+  }
+
+  handleInput(data: string): void {
+    if (matchesKey(data, Key.up)) {
+      this.move(-1);
+      return;
+    }
+    if (matchesKey(data, Key.down)) {
+      this.move(1);
+      return;
+    }
+    if (matchesKey(data, Key.right)) {
+      this.activePane = "anchor";
+      this.tui.requestRender();
+      return;
+    }
+    if (matchesKey(data, Key.left)) {
+      this.activePane = "chapter";
+      this.tui.requestRender();
+      return;
+    }
+    if (matchesKey(data, Key.enter)) {
+      if (this.activePane === "chapter") {
+        this.activePane = "anchor";
+        this.tui.requestRender();
+        return;
+      }
+
+      const anchor = this.selectedAnchor();
+      this.done(anchor ? { chapterIndex: anchor.position.chapter_index, chunkIndex: anchor.position.chunk_index } : undefined);
+      return;
+    }
+    if (matchesKey(data, Key.escape) || matchesKey(data, Key.ctrl("c"))) {
+      this.done(undefined);
+    }
+  }
+
+  render(width: number): string[] {
+    const contentWidth = Math.max(48, width - 4);
+    const chapterWidth = Math.max(20, Math.min(34, Math.floor(contentWidth * 0.34)));
+    const anchorWidth = 10;
+    const gap = 2;
+    const previewWidth = Math.max(16, contentWidth - chapterWidth - anchorWidth - gap * 2);
+    const maxRows = 14;
+    const visibleChapters = this.visibleChapters(maxRows);
+    const selectedChapter = this.selectedChapter();
+    const selectedAnchor = this.selectedAnchor();
+    const anchors = selectedChapter?.anchors ?? [];
+    const lines: string[] = [];
+
+    lines.push(this.borderTop(contentWidth));
+    lines.push(this.padContent(this.theme.fg("accent", "FishRead 目录"), contentWidth));
+    lines.push(this.separator(contentWidth));
+
+    for (let row = 0; row < maxRows; row++) {
+      const chapter = visibleChapters[row];
+      const chapterIndex = chapter ? this.chapters.indexOf(chapter) : -1;
+      const left = chapter
+        ? this.renderChapterItem(chapter, chapterIndex === this.selectedChapterIndex, chapterWidth)
+        : "".padEnd(chapterWidth, " ");
+      const anchor = anchors[row];
+      const middle = anchor
+        ? this.renderAnchorItem(anchor, row === this.selectedAnchorIndex, anchorWidth)
+        : "".padEnd(anchorWidth, " ");
+      const right = this.renderPreviewLine(selectedChapter, selectedAnchor, row, previewWidth);
+      lines.push(this.padContent(`${left}${" ".repeat(gap)}${middle}${" ".repeat(gap)}${right}`, contentWidth));
+    }
+
+    lines.push(this.borderBottom(contentWidth));
+    return lines;
+  }
+
+  invalidate() {}
+
+  private selectedChapter(): ChapterListItemDto | undefined {
+    return this.chapters[this.selectedChapterIndex];
+  }
+
+  private selectedAnchor(): ReadingAnchorDto | undefined {
+    return this.selectedChapter()?.anchors?.[this.selectedAnchorIndex];
+  }
+
+  private move(delta: number): void {
+    if (this.activePane === "chapter") {
+      if (this.chapters.length === 0) return;
+      this.selectedChapterIndex = Math.max(0, Math.min(this.chapters.length - 1, this.selectedChapterIndex + delta));
+      this.selectedAnchorIndex = this.defaultAnchorIndex();
+    } else {
+      const anchors = this.selectedChapter()?.anchors ?? [];
+      if (anchors.length === 0) return;
+      this.selectedAnchorIndex = Math.max(0, Math.min(anchors.length - 1, this.selectedAnchorIndex + delta));
+    }
+    this.tui.requestRender();
+  }
+
+  private visibleChapters(maxRows: number): ChapterListItemDto[] {
+    if (this.selectedChapterIndex < this.chapterTopIndex) {
+      this.chapterTopIndex = this.selectedChapterIndex;
+    } else if (this.selectedChapterIndex >= this.chapterTopIndex + maxRows) {
+      this.chapterTopIndex = this.selectedChapterIndex - maxRows + 1;
+    }
+    return this.chapters.slice(this.chapterTopIndex, this.chapterTopIndex + maxRows);
+  }
+
+  private renderChapterItem(chapter: ChapterListItemDto, selected: boolean, width: number): string {
+    const marker = chapter.current ? "◆" : " ";
+    const prefix = selected && this.activePane === "chapter" ? "›" : " ";
+    const raw = `${prefix} ${marker} 第 ${chapter.index + 1} 章 ${chapter.title}`;
+    const text = truncateToWidth(raw, width - 2, "", true);
+    return selected ? this.theme.fg("accent", text) : this.theme.fg("dim", text);
+  }
+
+  private renderAnchorItem(anchor: ReadingAnchorDto, selected: boolean, width: number): string {
+    const marker = anchor.current ? "◆" : " ";
+    const prefix = selected && this.activePane === "anchor" ? "›" : " ";
+    const text = truncateToWidth(`${prefix} ${marker} ${anchor.label}`, width, "", true);
+    return selected ? this.theme.fg("accent", text) : this.theme.fg("dim", text);
+  }
+
+  private renderPreviewLine(
+    chapter: ChapterListItemDto | undefined,
+    anchor: ReadingAnchorDto | undefined,
+    row: number,
+    width: number
+  ): string {
+    if (!chapter || !anchor) {
+      return truncateToWidth(this.theme.fg("dim", "暂无目录"), width, "", true);
+    }
+
+    const title = `${chapter.title} · ${anchor.label}`;
+    const meta = `chunk ${anchor.chunk.index}`;
+    const previewLines = wrapTextWithAnsi(anchor.preview, width);
+    const rows = [
+      this.theme.fg("text", truncateToWidth(title, width)),
+      this.theme.fg("dim", truncateToWidth(meta, width)),
+      "",
+      ...previewLines,
+    ];
+    return truncateToWidth(rows[row] ?? "", width, "", true);
+  }
+
+  private defaultAnchorIndex(): number {
+    const anchors = this.selectedChapter()?.anchors ?? [];
+    const currentIndex = anchors.findIndex((anchor) => anchor.current);
+    return Math.max(currentIndex, 0);
+  }
+
+  private borderTop(width: number): string {
+    return this.theme.fg("dim", `┌${"─".repeat(width)}┐`);
+  }
+
+  private borderBottom(width: number): string {
+    return this.theme.fg("dim", `└${"─".repeat(width)}┘`);
+  }
+
+  private separator(width: number): string {
+    return this.theme.fg("dim", `├${"─".repeat(width)}┤`);
+  }
+
+  private padContent(text: string, width: number): string {
+    const visible = visibleWidth(text);
+    const padded = visible < width ? text + " ".repeat(width - visible) : truncateToWidth(text, width, "");
+    return this.theme.fg("dim", "│") + padded + this.theme.fg("dim", "│");
+  }
 }
 
 function showReaderWidget(ctx: ExtensionContext) {
@@ -238,6 +435,42 @@ export default function (pi: ExtensionAPI) {
     applyReaderState(ctx, result);
   }
 
+  async function handleToc(ctx: ExtensionContext) {
+    if (bossKey.isHidden()) return;
+    if (ctx.mode !== "tui") {
+      ctx.ui.notify("[fishread] 目录需要 TUI 模式", "error");
+      return;
+    }
+
+    const navigation = await listReadingNavigation();
+    if (!navigation.ok) {
+      ctx.ui.notify(`[fishread] ${navigation.error.code}: ${navigation.error.message}`, "error");
+      return;
+    }
+
+    const selection = await ctx.ui.custom<NavigationSelection | undefined>(
+      (tui, theme, _kb, done) => new TocOverlay(navigation.data, theme, tui, done),
+      {
+        overlay: true,
+        overlayOptions: {
+          width: "82%",
+          minWidth: 54,
+          maxHeight: 20,
+          anchor: "center",
+          margin: 2,
+        },
+      }
+    );
+    if (!selection) return;
+
+    const result = await readJump(selection.chapterIndex, selection.chunkIndex);
+    if (!result.ok) {
+      ctx.ui.notify(`[fishread] ${result.error.code}: ${result.error.message}`, "error");
+      return;
+    }
+    applyReaderState(ctx, result);
+  }
+
   pi.registerShortcut(NEXT_PAGE_KEY, {
     description: `FishRead — 下一页 (${NEXT_PAGE_KEY_LABEL})`,
     handler: handleNext,
@@ -249,7 +482,7 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.registerCommand("fr", {
-    description: `FishRead — /fr <next|prev> (next: ${NEXT_PAGE_KEY_LABEL}, prev: ${PREV_PAGE_KEY_LABEL})`,
+    description: `FishRead — /fr <next|prev|toc> (next: ${NEXT_PAGE_KEY_LABEL}, prev: ${PREV_PAGE_KEY_LABEL})`,
     getArgumentCompletions: (prefix) => {
       return FR_SUBCOMMANDS
         .filter((s) => s.startsWith(prefix))
@@ -265,6 +498,7 @@ export default function (pi: ExtensionAPI) {
       switch (sub) {
         case "next": return handleNext(ctx);
         case "prev": return handlePrev(ctx);
+        case "toc": return handleToc(ctx);
         default:
           ctx.ui.notify(
             `未知子命令: ${sub || "(空)"}。可用: ${FR_SUBCOMMANDS.join(", ")}`,

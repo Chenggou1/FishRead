@@ -1,6 +1,11 @@
 import { spawn } from "node:child_process";
 import { resolveFishreadPath } from "@fishread/cli";
-import { PROTOCOL_VERSION, type ApiResult, type ReaderStateDto } from "./types.js";
+import {
+  PROTOCOL_VERSION,
+  type ApiResult,
+  type ChapterListDto,
+  type ReaderStateDto,
+} from "./types.js";
 
 export * from "./types.js";
 
@@ -88,4 +93,26 @@ export function readNext(): Promise<ApiResult<ReaderStateDto>> {
 
 export function readPrev(): Promise<ApiResult<ReaderStateDto>> {
   return run(["read", "prev"]) as Promise<ApiResult<ReaderStateDto>>;
+}
+
+export function readJump(
+  chapterIndex: number,
+  chunkIndex: number
+): Promise<ApiResult<ReaderStateDto>> {
+  return run([
+    "read",
+    "jump",
+    "--chapter-index",
+    String(chapterIndex),
+    "--chunk-index",
+    String(chunkIndex),
+  ]) as Promise<ApiResult<ReaderStateDto>>;
+}
+
+export function listChapters(): Promise<ApiResult<ChapterListDto>> {
+  return run(["chapter", "list"]) as Promise<ApiResult<ChapterListDto>>;
+}
+
+export function listReadingNavigation(): Promise<ApiResult<ChapterListDto>> {
+  return run(["chapter", "list", "--navigation"]) as Promise<ApiResult<ChapterListDto>>;
 }

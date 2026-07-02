@@ -9,7 +9,7 @@ const ANCHOR_CANDIDATES: &[(f64, &str)] = &[
     (75.0, "75%"),
     (90.0, "90%"),
 ];
-const PREVIEW_CHARS: usize = 48;
+const PREVIEW_CHARS: usize = 160;
 
 pub struct ChapterListItem {
     pub id: String,

@@ -21,6 +21,16 @@ export interface BookDto {
   format: string;
 }
 
+export interface BookRefDto {
+  id: string;
+  title: string;
+}
+
+export interface PositionDto {
+  chapter_index: number;
+  chunk_index: number;
+}
+
 export interface ChapterRefDto {
   id: string;
   index: number;
@@ -48,4 +58,32 @@ export interface ReaderStateDto {
   progress: ProgressDto;
   start_of_book: boolean;
   end_of_book: boolean;
+}
+
+export interface AnchorChunkDto {
+  index: number;
+  is_first: boolean;
+  is_last: boolean;
+}
+
+export interface ReadingAnchorDto {
+  label: string;
+  chapter_percent: number;
+  current: boolean;
+  position: PositionDto;
+  chunk: AnchorChunkDto;
+  preview: string;
+}
+
+export interface ChapterListItemDto {
+  id: string;
+  index: number;
+  title: string;
+  current: boolean;
+  anchors?: ReadingAnchorDto[];
+}
+
+export interface ChapterListDto {
+  book: BookRefDto;
+  chapters: ChapterListItemDto[];
 }
