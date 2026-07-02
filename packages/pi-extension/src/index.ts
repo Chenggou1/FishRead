@@ -1,8 +1,5 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { Input, Key, matchesKey, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import type { Component, TUI } from "@earendil-works/pi-tui";
-import { readdirSync } from "node:fs";
-import { homedir } from "node:os";
 import {
   deleteBook,
   importBook,
@@ -14,47 +11,41 @@ import {
   readPrev,
   useBook,
 } from "@fishread/sdk";
-import type {
-  ApiResponse,
-  BookListDto,
-  BookListItemDto,
-  ChapterListDto,
-  ChapterListItemDto,
-  ReaderStateDto,
-  ReadingAnchorDto,
-} from "@fishread/sdk";
-import { renderChunk, type ChunkMessageDetails } from "./renderers/chunk.js";
-
-const FR_SUBCOMMANDS = ["next", "prev", "toc", "books", "import"] as const;
-const BOSS_KEY = Key.ctrlShift("h");
-const NEXT_PAGE_KEY = Key.ctrlShift("right");
-const PREV_PAGE_KEY = Key.ctrlShift("left");
-const NEXT_PAGE_KEY_LABEL = "ctrl+shift+right";
-const PREV_PAGE_KEY_LABEL = "ctrl+shift+left";
-const STATUS_KEY = "fishread";
-const WIDGET_KEY = "fishread-reader";
-const DELETE_CONFIRM_TITLE_MAX_WIDTH = 48;
-const IMPORT_SUGGESTION_LIMIT = 6;
-
-const FR_SUBCOMMAND_DETAILS: Record<
-  (typeof FR_SUBCOMMANDS)[number],
-  { description: string; shortcut: string }
-> = {
-  next: { description: "下一页", shortcut: NEXT_PAGE_KEY_LABEL },
-  prev: { description: "上一页", shortcut: PREV_PAGE_KEY_LABEL },
-  toc: { description: "目录", shortcut: "/fr toc" },
-  books: { description: "图书管理", shortcut: "/fr books" },
-  import: { description: "导入 EPUB", shortcut: "/fr import [path]" },
-};
+import type { ApiResponse, BookListItemDto, ReaderStateDto } from "@fishread/sdk";
+import {
+  BOSS_KEY,
+  FR_SUBCOMMAND_DETAILS,
+  FR_SUBCOMMANDS,
+  NEXT_PAGE_KEY,
+  NEXT_PAGE_KEY_LABEL,
+  PREV_PAGE_KEY,
+  PREV_PAGE_KEY_LABEL,
+  STATUS_KEY,
+  WIDGET_KEY,
+} from "./constants.js";
+import {
+  PathInputOverlay,
+  normalizePathInput,
+  type PathInputOverlayResult,
+  type PathInputOverlayState,
+} from "./components/path-input-overlay.js";
+import { isBossKeyOverlayResult } from "./components/overlay-result.js";
+import {
+  BookSwitchOverlay,
+  createBookDeleteConfirmOverlay,
+  type BookDeleteConfirmation,
+  type BookLibraryResult,
+  type BookSwitchOverlayState,
+} from "./overlays/book-library.js";
+import { TocOverlay, type TocOverlayResult, type TocOverlayState } from "./overlays/toc.js";
+import { splitCommandArgs } from "./utils.js";
+import { ChunkWidget } from "./widgets/chunk-widget.js";
 
 type FishReadSurfaceId = "status" | "reader";
 type OverlayRestore = () => void | Promise<void>;
-type BossKeyOverlayResult<TState> = { type: "boss-key"; state: TState };
 
 let lastStatusText: string | undefined;
 let lastReaderState: ReaderStateDto | undefined;
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
 
 function buildStatusText(state: ReaderStateDto, theme: any): string {
   const { book, chapter, progress } = state;
@@ -95,757 +86,12 @@ function hideStatusLine(ctx: ExtensionContext) {
   ctx.ui.setStatus(STATUS_KEY, undefined);
 }
 
-function clampIndex(index: number, length: number): number {
-  if (length <= 0) return 0;
-  return Math.max(0, Math.min(length - 1, index));
-}
-
-function isBossKeyOverlayResult<TState>(result: unknown): result is BossKeyOverlayResult<TState> {
-  return !!result && typeof result === "object" && (result as { type?: unknown }).type === "boss-key";
-}
-
-function splitCommandArgs(args: string): { subcommand: string; rest: string } {
-  const trimmed = args.trim();
-  if (!trimmed) return { subcommand: "", rest: "" };
-
-  const match = /^(\S+)(?:\s+([\s\S]*))?$/.exec(trimmed);
-  return {
-    subcommand: match?.[1] ?? "",
-    rest: match?.[2]?.trim() ?? "",
-  };
-}
-
-function normalizeImportPath(input: string): string {
-  let path = input.trim();
-  const quoted =
-    (path.startsWith('"') && path.endsWith('"')) || (path.startsWith("'") && path.endsWith("'"));
-  if (quoted && path.length >= 2) {
-    path = path.slice(1, -1).trim();
-  }
-
-  return path;
-}
-
-function expandHomePath(path: string): string {
-  if (path === "~") return homedir();
-  if (path.startsWith("~/")) return `${homedir()}${path.slice(1)}`;
-  return path || ".";
-}
-
-function splitPathForCompletion(path: string): { dirInput: string; namePrefix: string } {
-  if (path === "~") return { dirInput: "~/", namePrefix: "" };
-
-  const lastSlash = path.lastIndexOf("/");
-  if (lastSlash === -1) return { dirInput: "", namePrefix: path };
-  return {
-    dirInput: path.slice(0, lastSlash + 1),
-    namePrefix: path.slice(lastSlash + 1),
-  };
-}
-
-function appendPathEntry(dirInput: string, name: string, directory: boolean): string {
-  return `${dirInput}${name}${directory ? "/" : ""}`;
-}
-
-// Widget Component: reads module-level state on every render call.
-class ChunkWidget implements Component {
-  constructor(private theme: any) {}
-
-  render(width: number): string[] {
-    if (!lastReaderState) return [];
-    const box = renderChunk(
-      lastReaderState.chunk.text,
-      { state: lastReaderState } satisfies ChunkMessageDetails,
-      this.theme
-    );
-    return box.render(width);
-  }
-
-  invalidate() {}
-}
-
-type BookLibraryAction =
-  | { type: "use"; book: BookListItemDto }
-  | { type: "delete"; book: BookListItemDto };
-type BookLibraryResult = BookLibraryAction | BossKeyOverlayResult<BookSwitchOverlayState> | undefined;
-type BookDeleteConfirmation = "confirmed" | "cancelled" | "boss-key";
-interface BookSwitchOverlayState {
-  selectedIndex: number;
-  topIndex: number;
-}
-
-class BookSwitchOverlay implements Component {
-  private readonly books: BookListItemDto[];
-  private selectedIndex: number;
-  private topIndex = 0;
-
-  constructor(
-    bookList: BookListDto,
-    private theme: any,
-    private tui: TUI,
-    private done: (action: BookLibraryResult) => void,
-    private confirmDelete: (book: BookListItemDto) => Promise<BookDeleteConfirmation>,
-    initialState?: BookSwitchOverlayState
-  ) {
-    this.books = bookList.books;
-    const defaultSelectedIndex = Math.max(
-      0,
-      this.books.findIndex((book) => book.current)
-    );
-    this.selectedIndex = clampIndex(initialState?.selectedIndex ?? defaultSelectedIndex, this.books.length);
-    this.topIndex = clampIndex(initialState?.topIndex ?? 0, this.books.length);
-  }
-
-  handleInput(data: string): void {
-    if (matchesKey(data, BOSS_KEY)) {
-      this.done({ type: "boss-key", state: this.snapshot() });
-      return;
-    }
-    if (matchesKey(data, Key.up)) {
-      this.move(-1);
-      return;
-    }
-    if (matchesKey(data, Key.down)) {
-      this.move(1);
-      return;
-    }
-    if (matchesKey(data, Key.enter)) {
-      const book = this.selectedBook();
-      this.done(book ? { type: "use", book } : undefined);
-      return;
-    }
-    if (data === "d") {
-      const book = this.selectedBook();
-      if (book) {
-        void this.confirmDelete(book).then((confirmation) => {
-          if (confirmation === "confirmed") {
-            this.done({ type: "delete", book });
-          } else if (confirmation === "cancelled") {
-            this.tui.requestRender();
-          } else {
-            this.done({ type: "boss-key", state: this.snapshot() });
-          }
-        });
-      }
-      return;
-    }
-    if (matchesKey(data, Key.escape) || matchesKey(data, Key.ctrl("c"))) {
-      this.done(undefined);
-    }
-  }
-
-  render(width: number): string[] {
-    const contentWidth = Math.max(48, width - 4);
-    const listWidth = Math.max(24, Math.min(42, Math.floor(contentWidth * 0.48)));
-    const gap = 2;
-    const detailWidth = Math.max(18, contentWidth - listWidth - gap);
-    const maxRows = 12;
-    const visibleBooks = this.visibleBooks(maxRows);
-    const selected = this.selectedBook();
-    const lines: string[] = [];
-
-    lines.push(this.borderTop(contentWidth));
-    lines.push(this.padContent(this.theme.fg("accent", "FishRead 图书管理"), contentWidth));
-    lines.push(this.separator(contentWidth));
-
-    for (let row = 0; row < maxRows; row++) {
-      const book = visibleBooks[row];
-      const bookIndex = book ? this.books.indexOf(book) : -1;
-      const left = book
-        ? this.renderBookItem(book, bookIndex === this.selectedIndex, listWidth)
-        : "".padEnd(listWidth, " ");
-      const right = this.renderBookDetailLine(selected, row, detailWidth);
-      lines.push(this.padContent(`${left}${" ".repeat(gap)}${right}`, contentWidth));
-    }
-
-    lines.push(this.separator(contentWidth));
-    lines.push(this.padContent(this.footerText(contentWidth), contentWidth));
-    lines.push(this.borderBottom(contentWidth));
-    return lines;
-  }
-
-  invalidate() {}
-
-  private selectedBook(): BookListItemDto | undefined {
-    return this.books[this.selectedIndex];
-  }
-
-  private move(delta: number): void {
-    if (this.books.length === 0) return;
-    this.selectedIndex = Math.max(0, Math.min(this.books.length - 1, this.selectedIndex + delta));
-    this.tui.requestRender();
-  }
-
-  private snapshot(): BookSwitchOverlayState {
-    return {
-      selectedIndex: this.selectedIndex,
-      topIndex: this.topIndex,
-    };
-  }
-
-  private visibleBooks(maxRows: number): BookListItemDto[] {
-    if (this.selectedIndex < this.topIndex) {
-      this.topIndex = this.selectedIndex;
-    } else if (this.selectedIndex >= this.topIndex + maxRows) {
-      this.topIndex = this.selectedIndex - maxRows + 1;
-    }
-    return this.books.slice(this.topIndex, this.topIndex + maxRows);
-  }
-
-  private renderBookItem(book: BookListItemDto, selected: boolean, width: number): string {
-    const marker = book.current ? "◆" : " ";
-    const prefix = selected ? "›" : " ";
-    const raw = `${prefix} ${marker} ${book.title}`;
-    const text = truncateToWidth(raw, width, "", true);
-    return selected ? this.theme.fg("accent", text) : this.theme.fg("dim", text);
-  }
-
-  private renderBookDetailLine(book: BookListItemDto | undefined, row: number, width: number): string {
-    if (!book) {
-      return truncateToWidth(this.theme.fg("dim", "书库为空"), width, "", true);
-    }
-
-    const importedAt = new Date(book.imported_at * 1000).toLocaleDateString();
-    const rows = [
-      this.theme.fg("text", truncateToWidth(book.title, width)),
-      this.theme.fg("dim", truncateToWidth(book.author ? `作者 ${book.author}` : "作者未知", width)),
-      this.theme.fg("dim", truncateToWidth(`格式 ${book.format}`, width)),
-      this.theme.fg(
-        "dim",
-        truncateToWidth(`进度 位置 ${book.position.chapter_index + 1} · ${book.reading_anchor_label}`, width)
-      ),
-      this.theme.fg("dim", truncateToWidth(`导入 ${importedAt}`, width)),
-      "",
-    ];
-    return truncateToWidth(rows[row] ?? "", width, "", true);
-  }
-
-  private footerText(width: number): string {
-    return this.theme.fg("dim", truncateToWidth("↑↓ 选择 · Enter 切换 · d 删除 · Esc 关闭", width));
-  }
-
-  private borderTop(width: number): string {
-    return this.theme.fg("dim", `┌${"─".repeat(width)}┐`);
-  }
-
-  private borderBottom(width: number): string {
-    return this.theme.fg("dim", `└${"─".repeat(width)}┘`);
-  }
-
-  private separator(width: number): string {
-    return this.theme.fg("dim", `├${"─".repeat(width)}┤`);
-  }
-
-  private padContent(text: string, width: number): string {
-    const visible = visibleWidth(text);
-    const padded = visible < width ? text + " ".repeat(width - visible) : truncateToWidth(text, width, "");
-    return this.theme.fg("dim", "│") + padded + this.theme.fg("dim", "│");
-  }
-}
-
-class BookDeleteConfirmOverlay implements Component {
-  private selectedIndex = 0;
-
-  constructor(
-    private book: BookListItemDto,
-    private tui: TUI,
-    private theme: any,
-    private done: (confirmed: BookDeleteConfirmation) => void
-  ) {}
-
-  handleInput(data: string): void {
-    if (matchesKey(data, BOSS_KEY)) {
-      this.done("boss-key");
-      return;
-    }
-    if (matchesKey(data, Key.up) || matchesKey(data, Key.down)) {
-      this.selectedIndex = this.selectedIndex === 0 ? 1 : 0;
-      this.tui.requestRender();
-      return;
-    }
-    if (matchesKey(data, Key.enter)) {
-      this.done(this.selectedIndex === 1 ? "confirmed" : "cancelled");
-      return;
-    }
-    if (matchesKey(data, Key.escape) || matchesKey(data, Key.ctrl("c"))) {
-      this.done("cancelled");
-    }
-  }
-
-  render(width: number): string[] {
-    const contentWidth = Math.max(40, width - 4);
-    const titleWidth = Math.min(contentWidth, DELETE_CONFIRM_TITLE_MAX_WIDTH);
-    const rows = [
-      this.theme.fg("text", "确认删除这本书？"),
-      this.theme.fg("accent", truncateToWidth(this.book.title, titleWidth, "...", true)),
-      this.theme.fg("dim", truncateToWidth(this.book.author ? `作者 ${this.book.author}` : "作者未知", contentWidth, "...", true)),
-      this.theme.fg(
-        "dim",
-        truncateToWidth(`进度 位置 ${this.book.position.chapter_index + 1} · ${this.book.reading_anchor_label}`, contentWidth, "...", true)
-      ),
-      "",
-      this.theme.fg("dim", truncateToWidth("将删除本地书籍、章节和阅读进度。", contentWidth, "...", true)),
-      this.renderChoice("否，取消", false, contentWidth),
-      this.renderChoice("是，删除", true, contentWidth),
-      this.theme.fg("dim", "↑↓ 选择 · Enter 确认 · Esc 取消"),
-    ];
-
-    return [
-      this.borderTop(contentWidth),
-      ...rows.map((row) => this.padContent(row, contentWidth)),
-      this.borderBottom(contentWidth),
-    ];
-  }
-
-  invalidate() {}
-
-  private borderTop(width: number): string {
-    return this.theme.fg("dim", `┌${"─".repeat(width)}┐`);
-  }
-
-  private borderBottom(width: number): string {
-    return this.theme.fg("dim", `└${"─".repeat(width)}┘`);
-  }
-
-  private renderChoice(label: string, destructive: boolean, width: number): string {
-    const selected = this.selectedIndex === (destructive ? 1 : 0);
-    const prefix = selected ? "› " : "  ";
-    const text = truncateToWidth(`${prefix}${label}`, width, "", true);
-    if (!selected) return this.theme.fg("dim", text);
-    return destructive ? this.theme.fg("error", text) : this.theme.fg("accent", text);
-  }
-
-  private padContent(text: string, width: number): string {
-    const visible = visibleWidth(text);
-    const padded = visible < width ? text + " ".repeat(width - visible) : truncateToWidth(text, width, "");
-    return this.theme.fg("dim", "│") + padded + this.theme.fg("dim", "│");
-  }
-}
-
-interface ImportPathOverlayState {
-  path: string;
-  selectedIndex: number;
-}
-
-interface ImportPathSuggestion {
-  value: string;
-  label: string;
-  directory: boolean;
-}
-
-type ImportPathResult = string | BossKeyOverlayResult<ImportPathOverlayState> | undefined;
-
-class ImportPathOverlay implements Component {
-  private readonly input = new Input();
-  private suggestions: ImportPathSuggestion[] = [];
-  private selectedIndex = 0;
-
-  constructor(
-    private theme: any,
-    private tui: TUI,
-    private done: (result: ImportPathResult) => void,
-    initialState?: ImportPathOverlayState
-  ) {
-    this.input.setValue(initialState?.path ?? "");
-    this.selectedIndex = initialState?.selectedIndex ?? 0;
-    this.input.onSubmit = (value) => this.submit(value);
-    this.input.onEscape = () => this.done(undefined);
-    this.refreshSuggestions();
-  }
-
-  handleInput(data: string): void {
-    if (matchesKey(data, BOSS_KEY)) {
-      this.done({ type: "boss-key", state: this.snapshot() });
-      return;
-    }
-    if (matchesKey(data, Key.up)) {
-      this.moveSelection(-1);
-      return;
-    }
-    if (matchesKey(data, Key.down)) {
-      this.moveSelection(1);
-      return;
-    }
-    if (matchesKey(data, Key.tab)) {
-      this.completeSelection();
-      return;
-    }
-    if (matchesKey(data, Key.enter)) {
-      const selected = this.selectedSuggestion();
-      if (selected?.directory) {
-        this.acceptSuggestion(selected);
-        return;
-      }
-      if (selected) {
-        this.submit(selected.value);
-        return;
-      }
-    }
-
-    this.input.handleInput(data);
-    this.refreshSuggestions();
-    this.tui.requestRender();
-  }
-
-  render(width: number): string[] {
-    const contentWidth = Math.max(46, width - 4);
-    const inputWidth = Math.max(16, contentWidth - 7);
-    const inputLine = this.input.render(inputWidth)[0] ?? "";
-    const lines: string[] = [];
-
-    lines.push(this.borderTop(contentWidth));
-    lines.push(this.padContent(this.theme.fg("accent", "FishRead 导入 EPUB"), contentWidth));
-    lines.push(this.separator(contentWidth));
-    lines.push(this.padContent(`${this.theme.fg("dim", "路径 ")}${inputLine}`, contentWidth));
-    lines.push(this.separator(contentWidth));
-
-    if (this.suggestions.length === 0) {
-      lines.push(this.padContent(this.theme.fg("dim", "没有匹配的目录或 EPUB 文件"), contentWidth));
-    } else {
-      for (let i = 0; i < IMPORT_SUGGESTION_LIMIT; i++) {
-        const suggestion = this.suggestions[i];
-        lines.push(this.padContent(this.renderSuggestion(suggestion, i, contentWidth), contentWidth));
-      }
-    }
-
-    lines.push(this.separator(contentWidth));
-    lines.push(this.padContent(this.footerText(contentWidth), contentWidth));
-    lines.push(this.borderBottom(contentWidth));
-    return lines;
-  }
-
-  invalidate() {}
-
-  private submit(value: string): void {
-    const path = normalizeImportPath(value);
-    this.done(path || undefined);
-  }
-
-  private snapshot(): ImportPathOverlayState {
-    return {
-      path: this.input.getValue(),
-      selectedIndex: this.selectedIndex,
-    };
-  }
-
-  private moveSelection(delta: number): void {
-    if (this.suggestions.length === 0) return;
-    this.selectedIndex = Math.max(0, Math.min(this.suggestions.length - 1, this.selectedIndex + delta));
-    this.tui.requestRender();
-  }
-
-  private completeSelection(): void {
-    this.refreshSuggestions();
-    const selected = this.selectedSuggestion();
-    if (!selected) {
-      this.tui.requestRender();
-      return;
-    }
-
-    this.acceptSuggestion(selected);
-  }
-
-  private acceptSuggestion(suggestion: ImportPathSuggestion): void {
-    this.input.setValue(suggestion.value);
-    this.refreshSuggestions();
-    this.tui.requestRender();
-  }
-
-  private selectedSuggestion(): ImportPathSuggestion | undefined {
-    return this.suggestions[this.selectedIndex];
-  }
-
-  private refreshSuggestions(): void {
-    const input = normalizeImportPath(this.input.getValue());
-    const { dirInput, namePrefix } = splitPathForCompletion(input);
-    const fsDir = expandHomePath(dirInput);
-    const prefix = namePrefix.toLocaleLowerCase();
-    const includeHidden = namePrefix.startsWith(".");
-
-    try {
-      this.suggestions = readdirSync(fsDir, { withFileTypes: true })
-        .filter((entry) => includeHidden || !entry.name.startsWith("."))
-        .filter((entry) => entry.name.toLocaleLowerCase().startsWith(prefix))
-        .filter((entry) => entry.isDirectory() || entry.name.toLocaleLowerCase().endsWith(".epub"))
-        .sort((a, b) => {
-          if (a.isDirectory() !== b.isDirectory()) return a.isDirectory() ? -1 : 1;
-          return a.name.localeCompare(b.name);
-        })
-        .slice(0, IMPORT_SUGGESTION_LIMIT)
-        .map((entry) => ({
-          value: appendPathEntry(dirInput, entry.name, entry.isDirectory()),
-          label: entry.name,
-          directory: entry.isDirectory(),
-        }));
-    } catch {
-      this.suggestions = [];
-    }
-
-    this.selectedIndex = clampIndex(this.selectedIndex, this.suggestions.length);
-  }
-
-  private renderSuggestion(suggestion: ImportPathSuggestion | undefined, row: number, width: number): string {
-    if (!suggestion) return "";
-
-    const selected = row === this.selectedIndex;
-    const prefix = selected ? "› " : "  ";
-    const kind = suggestion.directory ? "[目录]" : "[EPUB]";
-    const text = truncateToWidth(`${prefix}${kind} ${suggestion.label}`, width, "", true);
-    return selected ? this.theme.fg("accent", text) : this.theme.fg("dim", text);
-  }
-
-  private footerText(width: number): string {
-    return this.theme.fg("dim", truncateToWidth("Tab 补全 · ↑↓ 选择 · Enter 导入 · Esc 取消", width));
-  }
-
-  private borderTop(width: number): string {
-    return this.theme.fg("dim", `┌${"─".repeat(width)}┐`);
-  }
-
-  private borderBottom(width: number): string {
-    return this.theme.fg("dim", `└${"─".repeat(width)}┘`);
-  }
-
-  private separator(width: number): string {
-    return this.theme.fg("dim", `├${"─".repeat(width)}┤`);
-  }
-
-  private padContent(text: string, width: number): string {
-    const visible = visibleWidth(text);
-    const padded = visible < width ? text + " ".repeat(width - visible) : truncateToWidth(text, width, "");
-    return this.theme.fg("dim", "│") + padded + this.theme.fg("dim", "│");
-  }
-}
-
-interface NavigationSelection {
-  chapterIndex: number;
-  chunkIndex: number;
-}
-interface TocOverlayState {
-  selectedChapterIndex: number;
-  selectedAnchorIndex: number;
-  activePane: "chapter" | "anchor";
-  chapterTopIndex: number;
-}
-type TocOverlayResult = NavigationSelection | BossKeyOverlayResult<TocOverlayState> | undefined;
-
-class TocOverlay implements Component {
-  private readonly chapters: ChapterListItemDto[];
-  private selectedChapterIndex: number;
-  private selectedAnchorIndex: number;
-  private activePane: "chapter" | "anchor";
-  private chapterTopIndex = 0;
-
-  constructor(
-    navigation: ChapterListDto,
-    private theme: any,
-    private tui: TUI,
-    private done: (selection: TocOverlayResult) => void,
-    initialState?: TocOverlayState
-  ) {
-    this.chapters = navigation.chapters;
-    const defaultSelectedChapterIndex = Math.max(
-      0,
-      navigation.chapters.findIndex((chapter) => chapter.current)
-    );
-    this.selectedChapterIndex = clampIndex(
-      initialState?.selectedChapterIndex ?? defaultSelectedChapterIndex,
-      this.chapters.length
-    );
-    this.activePane = initialState?.activePane ?? "chapter";
-    this.selectedAnchorIndex = this.clampAnchorIndex(
-      initialState?.selectedAnchorIndex ?? this.defaultAnchorIndex()
-    );
-    this.chapterTopIndex = clampIndex(initialState?.chapterTopIndex ?? 0, this.chapters.length);
-  }
-
-  handleInput(data: string): void {
-    if (matchesKey(data, BOSS_KEY)) {
-      this.done({ type: "boss-key", state: this.snapshot() });
-      return;
-    }
-    if (matchesKey(data, Key.up)) {
-      this.move(-1);
-      return;
-    }
-    if (matchesKey(data, Key.down)) {
-      this.move(1);
-      return;
-    }
-    if (matchesKey(data, Key.right)) {
-      this.activePane = "anchor";
-      this.tui.requestRender();
-      return;
-    }
-    if (matchesKey(data, Key.left)) {
-      this.activePane = "chapter";
-      this.tui.requestRender();
-      return;
-    }
-    if (matchesKey(data, Key.enter)) {
-      if (this.activePane === "chapter") {
-        this.activePane = "anchor";
-        this.tui.requestRender();
-        return;
-      }
-
-      const anchor = this.selectedAnchor();
-      this.done(anchor ? { chapterIndex: anchor.position.chapter_index, chunkIndex: anchor.position.chunk_index } : undefined);
-      return;
-    }
-    if (matchesKey(data, Key.escape) || matchesKey(data, Key.ctrl("c"))) {
-      this.done(undefined);
-    }
-  }
-
-  render(width: number): string[] {
-    const contentWidth = Math.max(48, width - 4);
-    const chapterWidth = Math.max(20, Math.min(34, Math.floor(contentWidth * 0.34)));
-    const anchorWidth = 10;
-    const gap = 2;
-    const previewWidth = Math.max(16, contentWidth - chapterWidth - anchorWidth - gap * 2);
-    const maxRows = 14;
-    const visibleChapters = this.visibleChapters(maxRows);
-    const selectedChapter = this.selectedChapter();
-    const selectedAnchor = this.selectedAnchor();
-    const anchors = selectedChapter?.anchors ?? [];
-    const lines: string[] = [];
-
-    lines.push(this.borderTop(contentWidth));
-    lines.push(this.padContent(this.theme.fg("accent", "FishRead 目录"), contentWidth));
-    lines.push(this.separator(contentWidth));
-
-    for (let row = 0; row < maxRows; row++) {
-      const chapter = visibleChapters[row];
-      const chapterIndex = chapter ? this.chapters.indexOf(chapter) : -1;
-      const left = chapter
-        ? this.renderChapterItem(chapter, chapterIndex === this.selectedChapterIndex, chapterWidth)
-        : "".padEnd(chapterWidth, " ");
-      const anchor = anchors[row];
-      const middle = anchor
-        ? this.renderAnchorItem(anchor, row === this.selectedAnchorIndex, anchorWidth)
-        : "".padEnd(anchorWidth, " ");
-      const right = this.renderPreviewLine(selectedChapter, selectedAnchor, row, previewWidth);
-      lines.push(this.padContent(`${left}${" ".repeat(gap)}${middle}${" ".repeat(gap)}${right}`, contentWidth));
-    }
-
-    lines.push(this.borderBottom(contentWidth));
-    return lines;
-  }
-
-  invalidate() {}
-
-  private selectedChapter(): ChapterListItemDto | undefined {
-    return this.chapters[this.selectedChapterIndex];
-  }
-
-  private selectedAnchor(): ReadingAnchorDto | undefined {
-    return this.selectedChapter()?.anchors?.[this.selectedAnchorIndex];
-  }
-
-  private move(delta: number): void {
-    if (this.activePane === "chapter") {
-      if (this.chapters.length === 0) return;
-      this.selectedChapterIndex = Math.max(0, Math.min(this.chapters.length - 1, this.selectedChapterIndex + delta));
-      this.selectedAnchorIndex = this.defaultAnchorIndex();
-    } else {
-      const anchors = this.selectedChapter()?.anchors ?? [];
-      if (anchors.length === 0) return;
-      this.selectedAnchorIndex = Math.max(0, Math.min(anchors.length - 1, this.selectedAnchorIndex + delta));
-    }
-    this.tui.requestRender();
-  }
-
-  private snapshot(): TocOverlayState {
-    return {
-      selectedChapterIndex: this.selectedChapterIndex,
-      selectedAnchorIndex: this.selectedAnchorIndex,
-      activePane: this.activePane,
-      chapterTopIndex: this.chapterTopIndex,
-    };
-  }
-
-  private visibleChapters(maxRows: number): ChapterListItemDto[] {
-    if (this.selectedChapterIndex < this.chapterTopIndex) {
-      this.chapterTopIndex = this.selectedChapterIndex;
-    } else if (this.selectedChapterIndex >= this.chapterTopIndex + maxRows) {
-      this.chapterTopIndex = this.selectedChapterIndex - maxRows + 1;
-    }
-    return this.chapters.slice(this.chapterTopIndex, this.chapterTopIndex + maxRows);
-  }
-
-  private renderChapterItem(chapter: ChapterListItemDto, selected: boolean, width: number): string {
-    const marker = chapter.current ? "◆" : " ";
-    const prefix = selected && this.activePane === "chapter" ? "›" : " ";
-    const raw = `${prefix} ${marker} ${chapter.title}`;
-    const text = truncateToWidth(raw, width - 2, "", true);
-    return selected ? this.theme.fg("accent", text) : this.theme.fg("dim", text);
-  }
-
-  private renderAnchorItem(anchor: ReadingAnchorDto, selected: boolean, width: number): string {
-    const marker = anchor.current ? "◆" : " ";
-    const prefix = selected && this.activePane === "anchor" ? "›" : " ";
-    const text = truncateToWidth(`${prefix} ${marker} ${anchor.label}`, width, "", true);
-    return selected ? this.theme.fg("accent", text) : this.theme.fg("dim", text);
-  }
-
-  private renderPreviewLine(
-    chapter: ChapterListItemDto | undefined,
-    anchor: ReadingAnchorDto | undefined,
-    row: number,
-    width: number
-  ): string {
-    if (!chapter || !anchor) {
-      return truncateToWidth(this.theme.fg("dim", "暂无目录"), width, "", true);
-    }
-
-    const title = `${chapter.title} · ${anchor.label}`;
-    const meta = `chunk ${anchor.chunk.index}`;
-    const previewLines = wrapTextWithAnsi(anchor.preview, width);
-    const rows = [
-      this.theme.fg("text", truncateToWidth(title, width)),
-      this.theme.fg("dim", truncateToWidth(meta, width)),
-      "",
-      ...previewLines,
-    ];
-    return truncateToWidth(rows[row] ?? "", width, "", true);
-  }
-
-  private defaultAnchorIndex(): number {
-    const anchors = this.selectedChapter()?.anchors ?? [];
-    const currentIndex = anchors.findIndex((anchor) => anchor.current);
-    return Math.max(currentIndex, 0);
-  }
-
-  private clampAnchorIndex(index: number): number {
-    const anchors = this.selectedChapter()?.anchors ?? [];
-    return clampIndex(index, anchors.length);
-  }
-
-  private borderTop(width: number): string {
-    return this.theme.fg("dim", `┌${"─".repeat(width)}┐`);
-  }
-
-  private borderBottom(width: number): string {
-    return this.theme.fg("dim", `└${"─".repeat(width)}┘`);
-  }
-
-  private separator(width: number): string {
-    return this.theme.fg("dim", `├${"─".repeat(width)}┤`);
-  }
-
-  private padContent(text: string, width: number): string {
-    const visible = visibleWidth(text);
-    const padded = visible < width ? text + " ".repeat(width - visible) : truncateToWidth(text, width, "");
-    return this.theme.fg("dim", "│") + padded + this.theme.fg("dim", "│");
-  }
-}
-
 function showReaderWidget(ctx: ExtensionContext) {
   if (!ctx.hasUI) return;
   ctx.ui.setWidget(
     WIDGET_KEY,
-    (_tui: TUI, theme: any): Component & { dispose?(): void } => new ChunkWidget(theme),
+    (_tui: TUI, theme: any): Component & { dispose?(): void } =>
+      new ChunkWidget(theme, () => lastReaderState),
     { placement: "aboveEditor" }
   );
 }
@@ -957,25 +203,19 @@ bossKey.register({
   hide: hideReaderWidget,
 });
 
-// ── Extension entry ───────────────────────────────────────────────────────────
-
 export default function (pi: ExtensionAPI) {
-  // On session start: init status line + mount persistent reading widget.
   pi.on("session_start", async (_event, ctx) => {
     await reloadReaderState(ctx);
     bossKey.show(ctx, "status");
     bossKey.show(ctx, "reader");
   });
 
-  // Boss key is the only FishRead interaction that remains active while hidden.
   pi.registerShortcut(BOSS_KEY, {
     description: "FishRead Boss Key — 切换阅读 UI",
     handler: async (ctx) => {
       await bossKey.toggle(ctx);
     },
   });
-
-  // ── Navigation ──────────────────────────────────────────────────────────────
 
   function applyReaderState(ctx: ExtensionContext, result: ApiResponse<ReaderStateDto>) {
     const { data } = result;
@@ -1068,7 +308,7 @@ export default function (pi: ExtensionAPI) {
 
       const confirmDelete = (book: BookListItemDto) =>
         ctx.ui.custom<BookDeleteConfirmation>(
-          (tui, theme, _kb, done) => new BookDeleteConfirmOverlay(book, tui, theme, done),
+          (tui, theme, _kb, done) => createBookDeleteConfirmOverlay(book, tui, theme, done),
           {
             overlay: true,
             overlayOptions: {
@@ -1134,7 +374,7 @@ export default function (pi: ExtensionAPI) {
     }
   }
 
-  async function handleImport(ctx: ExtensionContext, pathArg?: string, initialState?: ImportPathOverlayState) {
+  async function handleImport(ctx: ExtensionContext, pathArg?: string, initialState?: PathInputOverlayState) {
     if (bossKey.isHidden()) return;
 
     let rawPath = pathArg && pathArg.trim() ? pathArg : undefined;
@@ -1142,8 +382,24 @@ export default function (pi: ExtensionAPI) {
       if (ctx.mode !== "tui") {
         rawPath = await ctx.ui.input("FishRead 导入", "输入 EPUB 文件路径");
       } else {
-        const selection = await ctx.ui.custom<ImportPathResult>(
-          (tui, theme, _kb, done) => new ImportPathOverlay(theme, tui, done, initialState),
+        const selection = await ctx.ui.custom<PathInputOverlayResult>(
+          (tui, theme, _kb, done) =>
+            new PathInputOverlay(
+              theme,
+              tui,
+              done,
+              {
+                bossKey: BOSS_KEY,
+                title: "FishRead 导入 EPUB",
+                emptyMessage: "没有匹配的目录或 EPUB 文件",
+                footer: "Tab 补全 · ↑↓ 选择 · Enter 导入 · Esc 取消",
+                directoryLabel: "目录",
+                fileLabel: "EPUB",
+                fileExtensions: [".epub"],
+                suggestionLimit: 6,
+              },
+              initialState
+            ),
           {
             overlay: true,
             overlayOptions: {
@@ -1155,7 +411,7 @@ export default function (pi: ExtensionAPI) {
             },
           }
         );
-        if (isBossKeyOverlayResult<ImportPathOverlayState>(selection)) {
+        if (isBossKeyOverlayResult<PathInputOverlayState>(selection)) {
           bossKey.hideWithOverlayRestore(ctx, () => handleImport(ctx, undefined, selection.state));
           return;
         }
@@ -1165,7 +421,7 @@ export default function (pi: ExtensionAPI) {
 
     if (!rawPath) return;
 
-    const importPath = normalizeImportPath(rawPath);
+    const importPath = normalizePathInput(rawPath);
     if (!importPath) return;
 
     const result = await importBook(importPath);
