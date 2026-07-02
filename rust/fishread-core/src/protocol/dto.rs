@@ -61,6 +61,8 @@ pub struct BookListItemDto {
     pub format: String,
     pub current: bool,
     pub imported_at: i64,
+    pub position: PositionDto,
+    pub reading_anchor_label: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -81,6 +83,11 @@ impl From<BookListResult> for BookListDto {
                     format: b.format,
                     current: b.current,
                     imported_at: b.imported_at,
+                    position: PositionDto {
+                        chapter_index: b.position.chapter_index,
+                        chunk_index: b.position.chunk_index,
+                    },
+                    reading_anchor_label: b.reading_anchor_label,
                 })
                 .collect(),
         }

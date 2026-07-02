@@ -36,6 +36,10 @@ _Avoid_: Package version, crate version, app version
 A location in a book where reading can resume or navigation can land.
 _Avoid_: Cursor, page, offset
 
+**Current Book**:
+The book selected as the active reading target for FishRead commands and UI Packages.
+_Avoid_: Open book, active file, selected EPUB
+
 **Reading Anchor**:
 A user-facing navigation target inside a chapter that represents a recognizable reading location, maps to a concrete Reading Position, and can be shown with nearby preview text. Reading Anchor labels use chapter-relative percentages.
 _Avoid_: Page, chunk, percent point, table-of-contents item

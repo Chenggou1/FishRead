@@ -3,6 +3,8 @@ import { resolveFishreadPath } from "@fishread/cli";
 import {
   PROTOCOL_VERSION,
   type ApiResult,
+  type BookListDto,
+  type BookUseDto,
   type ChapterListDto,
   type ReaderStateDto,
 } from "./types.js";
@@ -93,6 +95,14 @@ export function readNext(): Promise<ApiResult<ReaderStateDto>> {
 
 export function readPrev(): Promise<ApiResult<ReaderStateDto>> {
   return run(["read", "prev"]) as Promise<ApiResult<ReaderStateDto>>;
+}
+
+export function listBooks(): Promise<ApiResult<BookListDto>> {
+  return run(["book", "list"]) as Promise<ApiResult<BookListDto>>;
+}
+
+export function useBook(bookId: string): Promise<ApiResult<BookUseDto>> {
+  return run(["book", "use", bookId]) as Promise<ApiResult<BookUseDto>>;
 }
 
 export function readJump(

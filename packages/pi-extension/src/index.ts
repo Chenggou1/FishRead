@@ -1,9 +1,11 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Key, matchesKey, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import type { Component, TUI } from "@earendil-works/pi-tui";
-import { listReadingNavigation, readCurrent, readJump, readNext, readPrev } from "@fishread/sdk";
+import { listBooks, listReadingNavigation, readCurrent, readJump, readNext, readPrev, useBook } from "@fishread/sdk";
 import type {
   ApiResponse,
+  BookListDto,
+  BookListItemDto,
   ChapterListDto,
   ChapterListItemDto,
   ReaderStateDto,
@@ -11,7 +13,7 @@ import type {
 } from "@fishread/sdk";
 import { renderChunk, type ChunkMessageDetails } from "./renderers/chunk.js";
 
-const FR_SUBCOMMANDS = ["next", "prev", "toc"] as const;
+const FR_SUBCOMMANDS = ["next", "prev", "toc", "books"] as const;
 const BOSS_KEY = Key.ctrl("q");
 const NEXT_PAGE_KEY = Key.ctrlShift("right");
 const PREV_PAGE_KEY = Key.ctrlShift("left");
@@ -27,6 +29,7 @@ const FR_SUBCOMMAND_DETAILS: Record<
   next: { description: "下一页", shortcut: NEXT_PAGE_KEY_LABEL },
   prev: { description: "上一页", shortcut: PREV_PAGE_KEY_LABEL },
   toc: { description: "目录", shortcut: "/fr toc" },
+  books: { description: "切换书本", shortcut: "/fr books" },
 };
 
 type FishReadSurfaceId = "status" | "reader";
@@ -90,6 +93,139 @@ class ChunkWidget implements Component {
   }
 
   invalidate() {}
+}
+
+class BookSwitchOverlay implements Component {
+  private readonly books: BookListItemDto[];
+  private selectedIndex: number;
+  private topIndex = 0;
+
+  constructor(
+    bookList: BookListDto,
+    private theme: any,
+    private tui: TUI,
+    private done: (book: BookListItemDto | undefined) => void
+  ) {
+    this.books = bookList.books;
+    this.selectedIndex = Math.max(
+      0,
+      this.books.findIndex((book) => book.current)
+    );
+  }
+
+  handleInput(data: string): void {
+    if (matchesKey(data, Key.up)) {
+      this.move(-1);
+      return;
+    }
+    if (matchesKey(data, Key.down)) {
+      this.move(1);
+      return;
+    }
+    if (matchesKey(data, Key.enter)) {
+      this.done(this.selectedBook());
+      return;
+    }
+    if (matchesKey(data, Key.escape) || matchesKey(data, Key.ctrl("c"))) {
+      this.done(undefined);
+    }
+  }
+
+  render(width: number): string[] {
+    const contentWidth = Math.max(48, width - 4);
+    const listWidth = Math.max(24, Math.min(42, Math.floor(contentWidth * 0.48)));
+    const gap = 2;
+    const detailWidth = Math.max(18, contentWidth - listWidth - gap);
+    const maxRows = 12;
+    const visibleBooks = this.visibleBooks(maxRows);
+    const selected = this.selectedBook();
+    const lines: string[] = [];
+
+    lines.push(this.borderTop(contentWidth));
+    lines.push(this.padContent(this.theme.fg("accent", "FishRead 书库"), contentWidth));
+    lines.push(this.separator(contentWidth));
+
+    for (let row = 0; row < maxRows; row++) {
+      const book = visibleBooks[row];
+      const bookIndex = book ? this.books.indexOf(book) : -1;
+      const left = book
+        ? this.renderBookItem(book, bookIndex === this.selectedIndex, listWidth)
+        : "".padEnd(listWidth, " ");
+      const right = this.renderBookDetailLine(selected, row, detailWidth);
+      lines.push(this.padContent(`${left}${" ".repeat(gap)}${right}`, contentWidth));
+    }
+
+    lines.push(this.borderBottom(contentWidth));
+    return lines;
+  }
+
+  invalidate() {}
+
+  private selectedBook(): BookListItemDto | undefined {
+    return this.books[this.selectedIndex];
+  }
+
+  private move(delta: number): void {
+    if (this.books.length === 0) return;
+    this.selectedIndex = Math.max(0, Math.min(this.books.length - 1, this.selectedIndex + delta));
+    this.tui.requestRender();
+  }
+
+  private visibleBooks(maxRows: number): BookListItemDto[] {
+    if (this.selectedIndex < this.topIndex) {
+      this.topIndex = this.selectedIndex;
+    } else if (this.selectedIndex >= this.topIndex + maxRows) {
+      this.topIndex = this.selectedIndex - maxRows + 1;
+    }
+    return this.books.slice(this.topIndex, this.topIndex + maxRows);
+  }
+
+  private renderBookItem(book: BookListItemDto, selected: boolean, width: number): string {
+    const marker = book.current ? "◆" : " ";
+    const prefix = selected ? "›" : " ";
+    const raw = `${prefix} ${marker} ${book.title}`;
+    const text = truncateToWidth(raw, width, "", true);
+    return selected ? this.theme.fg("accent", text) : this.theme.fg("dim", text);
+  }
+
+  private renderBookDetailLine(book: BookListItemDto | undefined, row: number, width: number): string {
+    if (!book) {
+      return truncateToWidth(this.theme.fg("dim", "书库为空"), width, "", true);
+    }
+
+    const importedAt = new Date(book.imported_at * 1000).toLocaleDateString();
+    const rows = [
+      this.theme.fg("text", truncateToWidth(book.title, width)),
+      this.theme.fg("dim", truncateToWidth(book.author ? `作者 ${book.author}` : "作者未知", width)),
+      this.theme.fg("dim", truncateToWidth(`格式 ${book.format}`, width)),
+      this.theme.fg(
+        "dim",
+        truncateToWidth(`进度 第 ${book.position.chapter_index + 1} 章 · ${book.reading_anchor_label}`, width)
+      ),
+      this.theme.fg("dim", truncateToWidth(`导入 ${importedAt}`, width)),
+      "",
+      this.theme.fg("dim", "Enter 确认选择"),
+    ];
+    return truncateToWidth(rows[row] ?? "", width, "", true);
+  }
+
+  private borderTop(width: number): string {
+    return this.theme.fg("dim", `┌${"─".repeat(width)}┐`);
+  }
+
+  private borderBottom(width: number): string {
+    return this.theme.fg("dim", `└${"─".repeat(width)}┘`);
+  }
+
+  private separator(width: number): string {
+    return this.theme.fg("dim", `├${"─".repeat(width)}┤`);
+  }
+
+  private padContent(text: string, width: number): string {
+    const visible = visibleWidth(text);
+    const padded = visible < width ? text + " ".repeat(width - visible) : truncateToWidth(text, width, "");
+    return this.theme.fg("dim", "│") + padded + this.theme.fg("dim", "│");
+  }
 }
 
 interface NavigationSelection {
@@ -471,6 +607,52 @@ export default function (pi: ExtensionAPI) {
     applyReaderState(ctx, result);
   }
 
+  async function handleBooks(ctx: ExtensionContext) {
+    if (bossKey.isHidden()) return;
+    if (ctx.mode !== "tui") {
+      ctx.ui.notify("[fishread] 书库切换需要 TUI 模式", "error");
+      return;
+    }
+
+    const books = await listBooks();
+    if (!books.ok) {
+      ctx.ui.notify(`[fishread] ${books.error.code}: ${books.error.message}`, "error");
+      return;
+    }
+    if (books.data.books.length === 0) {
+      ctx.ui.notify("[fishread] 书库为空", "info");
+      return;
+    }
+
+    const selected = await ctx.ui.custom<BookListItemDto | undefined>(
+      (tui, theme, _kb, done) => new BookSwitchOverlay(books.data, theme, tui, done),
+      {
+        overlay: true,
+        overlayOptions: {
+          width: "72%",
+          minWidth: 52,
+          maxHeight: 18,
+          anchor: "center",
+          margin: 2,
+        },
+      }
+    );
+    if (!selected) return;
+
+    const used = await useBook(selected.id);
+    if (!used.ok) {
+      ctx.ui.notify(`[fishread] ${used.error.code}: ${used.error.message}`, "error");
+      return;
+    }
+
+    const current = await readCurrent();
+    if (!current.ok) {
+      ctx.ui.notify(`[fishread] ${current.error.code}: ${current.error.message}`, "error");
+      return;
+    }
+    applyReaderState(ctx, current);
+  }
+
   pi.registerShortcut(NEXT_PAGE_KEY, {
     description: `FishRead — 下一页 (${NEXT_PAGE_KEY_LABEL})`,
     handler: handleNext,
@@ -482,7 +664,7 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.registerCommand("fr", {
-    description: `FishRead — /fr <next|prev|toc> (next: ${NEXT_PAGE_KEY_LABEL}, prev: ${PREV_PAGE_KEY_LABEL})`,
+    description: `FishRead — /fr <next|prev|toc|books> (next: ${NEXT_PAGE_KEY_LABEL}, prev: ${PREV_PAGE_KEY_LABEL})`,
     getArgumentCompletions: (prefix) => {
       return FR_SUBCOMMANDS
         .filter((s) => s.startsWith(prefix))
@@ -499,6 +681,7 @@ export default function (pi: ExtensionAPI) {
         case "next": return handleNext(ctx);
         case "prev": return handlePrev(ctx);
         case "toc": return handleToc(ctx);
+        case "books": return handleBooks(ctx);
         default:
           ctx.ui.notify(
             `未知子命令: ${sub || "(空)"}。可用: ${FR_SUBCOMMANDS.join(", ")}`,

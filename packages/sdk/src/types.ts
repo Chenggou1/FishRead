@@ -21,6 +21,26 @@ export interface BookDto {
   format: string;
 }
 
+export interface BookListItemDto {
+  id: string;
+  title: string;
+  author?: string;
+  format: string;
+  current: boolean;
+  imported_at: number;
+  position: PositionDto;
+  reading_anchor_label: string;
+}
+
+export interface BookListDto {
+  books: BookListItemDto[];
+}
+
+export interface BookUseDto {
+  book: BookDto;
+  position: PositionDto;
+}
+
 export interface BookRefDto {
   id: string;
   title: string;

@@ -80,6 +80,9 @@ fn smoke_full_workflow() {
         books.iter().any(|b| b["current"] == true),
         "at least one book must be current"
     );
+    assert_eq!(books[0]["position"]["chapter_index"], 0);
+    assert_eq!(books[0]["position"]["chunk_index"], 0);
+    assert_eq!(books[0]["reading_anchor_label"], "0%");
 
     // --- book use ---
     let j = run_ok(cmd(db_path).args(["book", "use", &book_id]));

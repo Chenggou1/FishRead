@@ -1,5 +1,14 @@
 use crate::error::FishReadError;
-use crate::storage::{book_repo, settings_repo};
+use crate::reader::chunk;
+use crate::storage::{book_repo, chapter_repo, settings_repo};
+
+const ANCHOR_CANDIDATES: &[(f64, &str)] = &[
+    (0.0, "0%"),
+    (25.0, "25%"),
+    (50.0, "50%"),
+    (75.0, "75%"),
+    (90.0, "90%"),
+];
 
 pub struct BookListItem {
     pub id: String,
@@ -8,6 +17,8 @@ pub struct BookListItem {
     pub format: String,
     pub current: bool,
     pub imported_at: i64,
+    pub position: PositionInfo,
+    pub reading_anchor_label: String,
 }
 
 pub struct BookListResult {
@@ -51,17 +62,28 @@ impl<'a> LibraryService<'a> {
         let current_id = settings_repo::get_current_book_id(self.conn)
             .map_err(|e| FishReadError::Database(e.to_string()))?;
 
-        let books = rows
-            .into_iter()
-            .map(|r| BookListItem {
+        let mut books = Vec::with_capacity(rows.len());
+        for r in rows {
+            let (chapter_index, chunk_index) = book_repo::get_reading_position(self.conn, &r.id)
+                .map_err(|e| FishReadError::Database(e.to_string()))?
+                .unwrap_or((0, 0));
+            let reading_anchor_label =
+                self.reading_anchor_label(&r.id, chapter_index, chunk_index)?;
+
+            books.push(BookListItem {
                 current: current_id.as_deref() == Some(&r.id),
                 id: r.id,
                 title: r.title,
                 author: r.author,
                 format: r.format,
                 imported_at: r.imported_at,
-            })
-            .collect();
+                position: PositionInfo {
+                    chapter_index,
+                    chunk_index,
+                },
+                reading_anchor_label,
+            });
+        }
 
         Ok(BookListResult { books })
     }
@@ -130,4 +152,45 @@ impl<'a> LibraryService<'a> {
             cleared_current,
         })
     }
+
+    fn reading_anchor_label(
+        &self,
+        book_id: &str,
+        chapter_index: i64,
+        chunk_index: i64,
+    ) -> Result<String, FishReadError> {
+        let chapter = chapter_repo::find_by_index(self.conn, book_id, chapter_index)
+            .map_err(|e| FishReadError::Database(e.to_string()))?;
+        let Some(chapter) = chapter else {
+            return Ok("0%".to_owned());
+        };
+
+        let chunks = chunk::split(&chapter.content, chunk::CHUNK_SIZE);
+        Ok(anchor_label_for_chunk(chunks.len(), chunk_index).to_owned())
+    }
+}
+
+fn anchor_label_for_chunk(total_chunks: usize, chunk_index: i64) -> &'static str {
+    let mut current = ANCHOR_CANDIDATES[0].1;
+    let mut last_chunk_index: Option<usize> = None;
+    for (percent, label) in ANCHOR_CANDIDATES {
+        let anchor_chunk_index = anchor_chunk_index(*percent, total_chunks);
+        if Some(anchor_chunk_index) == last_chunk_index {
+            continue;
+        }
+        last_chunk_index = Some(anchor_chunk_index);
+
+        if anchor_chunk_index as i64 <= chunk_index {
+            current = label;
+        }
+    }
+    current
+}
+
+fn anchor_chunk_index(percent: f64, total_chunks: usize) -> usize {
+    if total_chunks <= 1 {
+        return 0;
+    }
+    let max_index = total_chunks - 1;
+    ((percent / 100.0) * max_index as f64).round() as usize
 }
