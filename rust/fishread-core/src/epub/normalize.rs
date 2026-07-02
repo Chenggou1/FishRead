@@ -38,6 +38,9 @@ pub fn normalize(epub: ParsedEpub, file_stem: &str) -> NormalizedBook {
     let mut chapters: Vec<NormalizedChapter> = Vec::new();
     for (source_index, parsed) in epub.chapters.into_iter().enumerate() {
         let content = xhtml_to_text(&parsed.xhtml);
+        if content.is_empty() {
+            continue;
+        }
 
         // Title priority: nav → h1 (already in text extraction fallback below) → "Chapter N"
         let title_str = parsed
@@ -56,17 +59,6 @@ pub fn normalize(epub: ParsedEpub, file_stem: &str) -> NormalizedBook {
                     format!("Chapter {}", source_index + 1)
                 })
             });
-
-        if content.is_empty() {
-            warnings.push(ImportWarning {
-                code: "SPINE_ITEM_SKIPPED".to_owned(),
-                message: format!(
-                    "Spine item '{}' produced no readable text and was skipped.",
-                    parsed.source_path
-                ),
-            });
-            continue;
-        }
 
         chapters.push(NormalizedChapter {
             source_index,
@@ -92,4 +84,62 @@ fn extract_first_heading(text: &str) -> Option<String> {
         .map(str::trim)
         .find(|l| !l.is_empty())
         .map(|l| l.chars().take(80).collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::epub::package::ParsedChapter;
+
+    fn parsed_epub(chapters: Vec<ParsedChapter>) -> ParsedEpub {
+        ParsedEpub {
+            title: Some("Test Book".to_owned()),
+            author: Some("Test Author".to_owned()),
+            language: None,
+            identifier: None,
+            chapters,
+        }
+    }
+
+    #[test]
+    fn empty_text_spine_items_are_skipped_without_warning() {
+        let book = normalize(
+            parsed_epub(vec![
+                ParsedChapter {
+                    source_path: "titlepage.xhtml".to_owned(),
+                    nav_title: None,
+                    xhtml: r#"<html><body><img src="cover.jpeg"/></body></html>"#.to_owned(),
+                },
+                ParsedChapter {
+                    source_path: "text/chapter1.xhtml".to_owned(),
+                    nav_title: Some("Chapter One".to_owned()),
+                    xhtml: "<html><body><p>Readable text.</p></body></html>".to_owned(),
+                },
+            ]),
+            "test",
+        );
+
+        assert_eq!(book.chapters.len(), 1);
+        assert_eq!(
+            book.chapters[0].source_path.as_deref(),
+            Some("text/chapter1.xhtml")
+        );
+        assert!(book.warnings.is_empty());
+    }
+
+    #[test]
+    fn text_spine_items_without_nav_titles_use_first_text_line() {
+        let book = normalize(
+            parsed_epub(vec![ParsedChapter {
+                source_path: "text/chapter1.xhtml".to_owned(),
+                nav_title: None,
+                xhtml: "<html><body><p>Readable text.</p></body></html>".to_owned(),
+            }]),
+            "test",
+        );
+
+        assert_eq!(book.chapters.len(), 1);
+        assert_eq!(book.chapters[0].title, "Readable text.");
+        assert!(book.warnings.iter().all(|w| w.code != "SPINE_ITEM_SKIPPED"));
+    }
 }

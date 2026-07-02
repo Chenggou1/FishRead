@@ -43,6 +43,8 @@ const FR_SUBCOMMAND_DETAILS: Record<
 };
 
 type FishReadSurfaceId = "status" | "reader";
+type OverlayRestore = () => void | Promise<void>;
+type BossKeyOverlayResult<TState> = { type: "boss-key"; state: TState };
 
 let lastStatusText: string | undefined;
 let lastReaderState: ReaderStateDto | undefined;
@@ -88,6 +90,15 @@ function hideStatusLine(ctx: ExtensionContext) {
   ctx.ui.setStatus(STATUS_KEY, undefined);
 }
 
+function clampIndex(index: number, length: number): number {
+  if (length <= 0) return 0;
+  return Math.max(0, Math.min(length - 1, index));
+}
+
+function isBossKeyOverlayResult<TState>(result: unknown): result is BossKeyOverlayResult<TState> {
+  return !!result && typeof result === "object" && (result as { type?: unknown }).type === "boss-key";
+}
+
 // Widget Component: reads module-level state on every render call.
 class ChunkWidget implements Component {
   constructor(private theme: any) {}
@@ -108,6 +119,12 @@ class ChunkWidget implements Component {
 type BookLibraryAction =
   | { type: "use"; book: BookListItemDto }
   | { type: "delete"; book: BookListItemDto };
+type BookLibraryResult = BookLibraryAction | BossKeyOverlayResult<BookSwitchOverlayState> | undefined;
+type BookDeleteConfirmation = "confirmed" | "cancelled" | "boss-key";
+interface BookSwitchOverlayState {
+  selectedIndex: number;
+  topIndex: number;
+}
 
 class BookSwitchOverlay implements Component {
   private readonly books: BookListItemDto[];
@@ -118,17 +135,24 @@ class BookSwitchOverlay implements Component {
     bookList: BookListDto,
     private theme: any,
     private tui: TUI,
-    private done: (action: BookLibraryAction | undefined) => void,
-    private confirmDelete: (book: BookListItemDto) => Promise<boolean>
+    private done: (action: BookLibraryResult) => void,
+    private confirmDelete: (book: BookListItemDto) => Promise<BookDeleteConfirmation>,
+    initialState?: BookSwitchOverlayState
   ) {
     this.books = bookList.books;
-    this.selectedIndex = Math.max(
+    const defaultSelectedIndex = Math.max(
       0,
       this.books.findIndex((book) => book.current)
     );
+    this.selectedIndex = clampIndex(initialState?.selectedIndex ?? defaultSelectedIndex, this.books.length);
+    this.topIndex = clampIndex(initialState?.topIndex ?? 0, this.books.length);
   }
 
   handleInput(data: string): void {
+    if (matchesKey(data, BOSS_KEY)) {
+      this.done({ type: "boss-key", state: this.snapshot() });
+      return;
+    }
     if (matchesKey(data, Key.up)) {
       this.move(-1);
       return;
@@ -145,11 +169,13 @@ class BookSwitchOverlay implements Component {
     if (data === "d") {
       const book = this.selectedBook();
       if (book) {
-        void this.confirmDelete(book).then((confirmed) => {
-          if (confirmed) {
+        void this.confirmDelete(book).then((confirmation) => {
+          if (confirmation === "confirmed") {
             this.done({ type: "delete", book });
-          } else {
+          } else if (confirmation === "cancelled") {
             this.tui.requestRender();
+          } else {
+            this.done({ type: "boss-key", state: this.snapshot() });
           }
         });
       }
@@ -200,6 +226,13 @@ class BookSwitchOverlay implements Component {
     if (this.books.length === 0) return;
     this.selectedIndex = Math.max(0, Math.min(this.books.length - 1, this.selectedIndex + delta));
     this.tui.requestRender();
+  }
+
+  private snapshot(): BookSwitchOverlayState {
+    return {
+      selectedIndex: this.selectedIndex,
+      topIndex: this.topIndex,
+    };
   }
 
   private visibleBooks(maxRows: number): BookListItemDto[] {
@@ -269,21 +302,25 @@ class BookDeleteConfirmOverlay implements Component {
     private book: BookListItemDto,
     private tui: TUI,
     private theme: any,
-    private done: (confirmed: boolean) => void
+    private done: (confirmed: BookDeleteConfirmation) => void
   ) {}
 
   handleInput(data: string): void {
+    if (matchesKey(data, BOSS_KEY)) {
+      this.done("boss-key");
+      return;
+    }
     if (matchesKey(data, Key.up) || matchesKey(data, Key.down)) {
       this.selectedIndex = this.selectedIndex === 0 ? 1 : 0;
       this.tui.requestRender();
       return;
     }
     if (matchesKey(data, Key.enter)) {
-      this.done(this.selectedIndex === 1);
+      this.done(this.selectedIndex === 1 ? "confirmed" : "cancelled");
       return;
     }
     if (matchesKey(data, Key.escape) || matchesKey(data, Key.ctrl("c"))) {
-      this.done(false);
+      this.done("cancelled");
     }
   }
 
@@ -341,29 +378,49 @@ interface NavigationSelection {
   chapterIndex: number;
   chunkIndex: number;
 }
+interface TocOverlayState {
+  selectedChapterIndex: number;
+  selectedAnchorIndex: number;
+  activePane: "chapter" | "anchor";
+  chapterTopIndex: number;
+}
+type TocOverlayResult = NavigationSelection | BossKeyOverlayResult<TocOverlayState> | undefined;
 
 class TocOverlay implements Component {
   private readonly chapters: ChapterListItemDto[];
   private selectedChapterIndex: number;
   private selectedAnchorIndex: number;
-  private activePane: "chapter" | "anchor" = "chapter";
+  private activePane: "chapter" | "anchor";
   private chapterTopIndex = 0;
 
   constructor(
     navigation: ChapterListDto,
     private theme: any,
     private tui: TUI,
-    private done: (selection: NavigationSelection | undefined) => void
+    private done: (selection: TocOverlayResult) => void,
+    initialState?: TocOverlayState
   ) {
     this.chapters = navigation.chapters;
-    this.selectedChapterIndex = Math.max(
+    const defaultSelectedChapterIndex = Math.max(
       0,
       navigation.chapters.findIndex((chapter) => chapter.current)
     );
-    this.selectedAnchorIndex = this.defaultAnchorIndex();
+    this.selectedChapterIndex = clampIndex(
+      initialState?.selectedChapterIndex ?? defaultSelectedChapterIndex,
+      this.chapters.length
+    );
+    this.activePane = initialState?.activePane ?? "chapter";
+    this.selectedAnchorIndex = this.clampAnchorIndex(
+      initialState?.selectedAnchorIndex ?? this.defaultAnchorIndex()
+    );
+    this.chapterTopIndex = clampIndex(initialState?.chapterTopIndex ?? 0, this.chapters.length);
   }
 
   handleInput(data: string): void {
+    if (matchesKey(data, BOSS_KEY)) {
+      this.done({ type: "boss-key", state: this.snapshot() });
+      return;
+    }
     if (matchesKey(data, Key.up)) {
       this.move(-1);
       return;
@@ -456,6 +513,15 @@ class TocOverlay implements Component {
     this.tui.requestRender();
   }
 
+  private snapshot(): TocOverlayState {
+    return {
+      selectedChapterIndex: this.selectedChapterIndex,
+      selectedAnchorIndex: this.selectedAnchorIndex,
+      activePane: this.activePane,
+      chapterTopIndex: this.chapterTopIndex,
+    };
+  }
+
   private visibleChapters(maxRows: number): ChapterListItemDto[] {
     if (this.selectedChapterIndex < this.chapterTopIndex) {
       this.chapterTopIndex = this.selectedChapterIndex;
@@ -508,6 +574,11 @@ class TocOverlay implements Component {
     return Math.max(currentIndex, 0);
   }
 
+  private clampAnchorIndex(index: number): number {
+    const anchors = this.selectedChapter()?.anchors ?? [];
+    return clampIndex(index, anchors.length);
+  }
+
   private borderTop(width: number): string {
     return this.theme.fg("dim", `┌${"─".repeat(width)}┐`);
   }
@@ -552,6 +623,7 @@ class BossKeyController {
   private readonly surfaces = new Map<FishReadSurfaceId, FishReadSurface>();
   private readonly activeSurfaces = new Set<FishReadSurfaceId>();
   private restoreSurfaces = new Set<FishReadSurfaceId>();
+  private restoreOverlay: OverlayRestore | undefined;
 
   register(surface: FishReadSurface): void {
     this.surfaces.set(surface.id, surface);
@@ -587,6 +659,13 @@ class BossKeyController {
     this.enterHiddenState(ctx);
   }
 
+  hideWithOverlayRestore(ctx: ExtensionContext, restoreOverlay: OverlayRestore): void {
+    if (this.hidden) return;
+
+    this.restoreOverlay = restoreOverlay;
+    this.enterHiddenState(ctx);
+  }
+
   private enterHiddenState(ctx: ExtensionContext): void {
     this.restoreSurfaces = new Set(this.activeSurfaces);
     for (const surfaceId of this.restoreSurfaces) {
@@ -599,6 +678,8 @@ class BossKeyController {
   private async restore(ctx: ExtensionContext): Promise<void> {
     this.hidden = false;
     await reloadReaderState(ctx);
+    const restoreOverlay = this.restoreOverlay;
+    this.restoreOverlay = undefined;
 
     for (const surfaceId of this.restoreSurfaces) {
       const surface = this.surfaces.get(surfaceId);
@@ -613,6 +694,9 @@ class BossKeyController {
     }
 
     this.restoreSurfaces.clear();
+    if (restoreOverlay) {
+      void restoreOverlay();
+    }
   }
 }
 
@@ -680,7 +764,7 @@ export default function (pi: ExtensionAPI) {
     applyReaderState(ctx, result);
   }
 
-  async function handleToc(ctx: ExtensionContext) {
+  async function handleToc(ctx: ExtensionContext, initialState?: TocOverlayState) {
     if (bossKey.isHidden()) return;
     if (ctx.mode !== "tui") {
       ctx.ui.notify("[fishread] 目录需要 TUI 模式", "error");
@@ -693,8 +777,8 @@ export default function (pi: ExtensionAPI) {
       return;
     }
 
-    const selection = await ctx.ui.custom<NavigationSelection | undefined>(
-      (tui, theme, _kb, done) => new TocOverlay(navigation.data, theme, tui, done),
+    const selection = await ctx.ui.custom<TocOverlayResult>(
+      (tui, theme, _kb, done) => new TocOverlay(navigation.data, theme, tui, done, initialState),
       {
         overlay: true,
         overlayOptions: {
@@ -706,6 +790,10 @@ export default function (pi: ExtensionAPI) {
         },
       }
     );
+    if (isBossKeyOverlayResult<TocOverlayState>(selection)) {
+      bossKey.hideWithOverlayRestore(ctx, () => handleToc(ctx, selection.state));
+      return;
+    }
     if (!selection) return;
 
     const result = await readJump(selection.chapterIndex, selection.chunkIndex);
@@ -716,13 +804,14 @@ export default function (pi: ExtensionAPI) {
     applyReaderState(ctx, result);
   }
 
-  async function handleBooks(ctx: ExtensionContext) {
+  async function handleBooks(ctx: ExtensionContext, initialState?: BookSwitchOverlayState) {
     if (bossKey.isHidden()) return;
     if (ctx.mode !== "tui") {
       ctx.ui.notify("[fishread] 图书管理需要 TUI 模式", "error");
       return;
     }
 
+    let restoreState = initialState;
     while (true) {
       const books = await listBooks();
       if (!books.ok) {
@@ -735,7 +824,7 @@ export default function (pi: ExtensionAPI) {
       }
 
       const confirmDelete = (book: BookListItemDto) =>
-        ctx.ui.custom<boolean>(
+        ctx.ui.custom<BookDeleteConfirmation>(
           (tui, theme, _kb, done) => new BookDeleteConfirmOverlay(book, tui, theme, done),
           {
             overlay: true,
@@ -750,8 +839,8 @@ export default function (pi: ExtensionAPI) {
           }
         );
 
-      const action = await ctx.ui.custom<BookLibraryAction | undefined>(
-        (tui, theme, _kb, done) => new BookSwitchOverlay(books.data, theme, tui, done, confirmDelete),
+      const action = await ctx.ui.custom<BookLibraryResult>(
+        (tui, theme, _kb, done) => new BookSwitchOverlay(books.data, theme, tui, done, confirmDelete, restoreState),
         {
           overlay: true,
           overlayOptions: {
@@ -763,6 +852,11 @@ export default function (pi: ExtensionAPI) {
           },
         }
       );
+      restoreState = undefined;
+      if (isBossKeyOverlayResult<BookSwitchOverlayState>(action)) {
+        bossKey.hideWithOverlayRestore(ctx, () => handleBooks(ctx, action.state));
+        return;
+      }
       if (!action) return;
 
       if (action.type === "delete") {

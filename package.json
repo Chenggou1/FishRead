@@ -22,6 +22,6 @@
     "install:rust": "cargo install --path rust/fishread-cli --bin fishread --locked --force",
     "smoke": "pnpm run smoke:rust",
     "smoke:rust": "node scripts/smoke-cli.js",
-    "dev:pi": "pi --no-extensions -e packages/pi-extension/src/index.ts"
+    "dev:pi": "pnpm run build:rust && pi --no-extensions -e packages/pi-extension/src/index.ts"
   }
 }
