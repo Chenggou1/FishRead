@@ -1,7 +1,16 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Key, matchesKey, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import type { Component, TUI } from "@earendil-works/pi-tui";
-import { listBooks, listReadingNavigation, readCurrent, readJump, readNext, readPrev, useBook } from "@fishread/sdk";
+import {
+  deleteBook,
+  listBooks,
+  listReadingNavigation,
+  readCurrent,
+  readJump,
+  readNext,
+  readPrev,
+  useBook,
+} from "@fishread/sdk";
 import type {
   ApiResponse,
   BookListDto,
@@ -21,6 +30,7 @@ const NEXT_PAGE_KEY_LABEL = "ctrl+shift+right";
 const PREV_PAGE_KEY_LABEL = "ctrl+shift+left";
 const STATUS_KEY = "fishread";
 const WIDGET_KEY = "fishread-reader";
+const DELETE_CONFIRM_TITLE_MAX_WIDTH = 48;
 
 const FR_SUBCOMMAND_DETAILS: Record<
   (typeof FR_SUBCOMMANDS)[number],
@@ -29,7 +39,7 @@ const FR_SUBCOMMAND_DETAILS: Record<
   next: { description: "下一页", shortcut: NEXT_PAGE_KEY_LABEL },
   prev: { description: "上一页", shortcut: PREV_PAGE_KEY_LABEL },
   toc: { description: "目录", shortcut: "/fr toc" },
-  books: { description: "切换书本", shortcut: "/fr books" },
+  books: { description: "图书管理", shortcut: "/fr books" },
 };
 
 type FishReadSurfaceId = "status" | "reader";
@@ -58,7 +68,7 @@ async function reloadReaderState(ctx: ExtensionContext): Promise<void> {
     const result = await readCurrent();
     if (!result.ok) {
       lastReaderState = undefined;
-      lastStatusText = ctx.ui.theme.fg("dim", "◆ FishRead · 使用 /fr import <path> 导入一本书开始阅读");
+      lastStatusText = ctx.ui.theme.fg("dim", "◆ FishRead · 使用 /fr books 选择图书开始阅读");
       return;
     }
 
@@ -95,6 +105,10 @@ class ChunkWidget implements Component {
   invalidate() {}
 }
 
+type BookLibraryAction =
+  | { type: "use"; book: BookListItemDto }
+  | { type: "delete"; book: BookListItemDto };
+
 class BookSwitchOverlay implements Component {
   private readonly books: BookListItemDto[];
   private selectedIndex: number;
@@ -104,7 +118,8 @@ class BookSwitchOverlay implements Component {
     bookList: BookListDto,
     private theme: any,
     private tui: TUI,
-    private done: (book: BookListItemDto | undefined) => void
+    private done: (action: BookLibraryAction | undefined) => void,
+    private confirmDelete: (book: BookListItemDto) => Promise<boolean>
   ) {
     this.books = bookList.books;
     this.selectedIndex = Math.max(
@@ -123,7 +138,21 @@ class BookSwitchOverlay implements Component {
       return;
     }
     if (matchesKey(data, Key.enter)) {
-      this.done(this.selectedBook());
+      const book = this.selectedBook();
+      this.done(book ? { type: "use", book } : undefined);
+      return;
+    }
+    if (data === "d") {
+      const book = this.selectedBook();
+      if (book) {
+        void this.confirmDelete(book).then((confirmed) => {
+          if (confirmed) {
+            this.done({ type: "delete", book });
+          } else {
+            this.tui.requestRender();
+          }
+        });
+      }
       return;
     }
     if (matchesKey(data, Key.escape) || matchesKey(data, Key.ctrl("c"))) {
@@ -142,7 +171,7 @@ class BookSwitchOverlay implements Component {
     const lines: string[] = [];
 
     lines.push(this.borderTop(contentWidth));
-    lines.push(this.padContent(this.theme.fg("accent", "FishRead 书库"), contentWidth));
+    lines.push(this.padContent(this.theme.fg("accent", "FishRead 图书管理"), contentWidth));
     lines.push(this.separator(contentWidth));
 
     for (let row = 0; row < maxRows; row++) {
@@ -155,6 +184,8 @@ class BookSwitchOverlay implements Component {
       lines.push(this.padContent(`${left}${" ".repeat(gap)}${right}`, contentWidth));
     }
 
+    lines.push(this.separator(contentWidth));
+    lines.push(this.padContent(this.footerText(contentWidth), contentWidth));
     lines.push(this.borderBottom(contentWidth));
     return lines;
   }
@@ -204,9 +235,12 @@ class BookSwitchOverlay implements Component {
       ),
       this.theme.fg("dim", truncateToWidth(`导入 ${importedAt}`, width)),
       "",
-      this.theme.fg("dim", "Enter 确认选择"),
     ];
     return truncateToWidth(rows[row] ?? "", width, "", true);
+  }
+
+  private footerText(width: number): string {
+    return this.theme.fg("dim", truncateToWidth("↑↓ 选择 · Enter 切换 · d 删除 · Esc 关闭", width));
   }
 
   private borderTop(width: number): string {
@@ -219,6 +253,81 @@ class BookSwitchOverlay implements Component {
 
   private separator(width: number): string {
     return this.theme.fg("dim", `├${"─".repeat(width)}┤`);
+  }
+
+  private padContent(text: string, width: number): string {
+    const visible = visibleWidth(text);
+    const padded = visible < width ? text + " ".repeat(width - visible) : truncateToWidth(text, width, "");
+    return this.theme.fg("dim", "│") + padded + this.theme.fg("dim", "│");
+  }
+}
+
+class BookDeleteConfirmOverlay implements Component {
+  private selectedIndex = 0;
+
+  constructor(
+    private book: BookListItemDto,
+    private tui: TUI,
+    private theme: any,
+    private done: (confirmed: boolean) => void
+  ) {}
+
+  handleInput(data: string): void {
+    if (matchesKey(data, Key.up) || matchesKey(data, Key.down)) {
+      this.selectedIndex = this.selectedIndex === 0 ? 1 : 0;
+      this.tui.requestRender();
+      return;
+    }
+    if (matchesKey(data, Key.enter)) {
+      this.done(this.selectedIndex === 1);
+      return;
+    }
+    if (matchesKey(data, Key.escape) || matchesKey(data, Key.ctrl("c"))) {
+      this.done(false);
+    }
+  }
+
+  render(width: number): string[] {
+    const contentWidth = Math.max(40, width - 4);
+    const titleWidth = Math.min(contentWidth, DELETE_CONFIRM_TITLE_MAX_WIDTH);
+    const rows = [
+      this.theme.fg("text", "确认删除这本书？"),
+      this.theme.fg("accent", truncateToWidth(this.book.title, titleWidth, "...", true)),
+      this.theme.fg("dim", truncateToWidth(this.book.author ? `作者 ${this.book.author}` : "作者未知", contentWidth, "...", true)),
+      this.theme.fg(
+        "dim",
+        truncateToWidth(`进度 第 ${this.book.position.chapter_index + 1} 章 · ${this.book.reading_anchor_label}`, contentWidth, "...", true)
+      ),
+      "",
+      this.theme.fg("dim", truncateToWidth("将删除本地书籍、章节和阅读进度。", contentWidth, "...", true)),
+      this.renderChoice("否，取消", false, contentWidth),
+      this.renderChoice("是，删除", true, contentWidth),
+      this.theme.fg("dim", "↑↓ 选择 · Enter 确认 · Esc 取消"),
+    ];
+
+    return [
+      this.borderTop(contentWidth),
+      ...rows.map((row) => this.padContent(row, contentWidth)),
+      this.borderBottom(contentWidth),
+    ];
+  }
+
+  invalidate() {}
+
+  private borderTop(width: number): string {
+    return this.theme.fg("dim", `┌${"─".repeat(width)}┐`);
+  }
+
+  private borderBottom(width: number): string {
+    return this.theme.fg("dim", `└${"─".repeat(width)}┘`);
+  }
+
+  private renderChoice(label: string, destructive: boolean, width: number): string {
+    const selected = this.selectedIndex === (destructive ? 1 : 0);
+    const prefix = selected ? "› " : "  ";
+    const text = truncateToWidth(`${prefix}${label}`, width, "", true);
+    if (!selected) return this.theme.fg("dim", text);
+    return destructive ? this.theme.fg("error", text) : this.theme.fg("accent", text);
   }
 
   private padContent(text: string, width: number): string {
@@ -610,47 +719,82 @@ export default function (pi: ExtensionAPI) {
   async function handleBooks(ctx: ExtensionContext) {
     if (bossKey.isHidden()) return;
     if (ctx.mode !== "tui") {
-      ctx.ui.notify("[fishread] 书库切换需要 TUI 模式", "error");
+      ctx.ui.notify("[fishread] 图书管理需要 TUI 模式", "error");
       return;
     }
 
-    const books = await listBooks();
-    if (!books.ok) {
-      ctx.ui.notify(`[fishread] ${books.error.code}: ${books.error.message}`, "error");
-      return;
-    }
-    if (books.data.books.length === 0) {
-      ctx.ui.notify("[fishread] 书库为空", "info");
-      return;
-    }
-
-    const selected = await ctx.ui.custom<BookListItemDto | undefined>(
-      (tui, theme, _kb, done) => new BookSwitchOverlay(books.data, theme, tui, done),
-      {
-        overlay: true,
-        overlayOptions: {
-          width: "72%",
-          minWidth: 52,
-          maxHeight: 18,
-          anchor: "center",
-          margin: 2,
-        },
+    while (true) {
+      const books = await listBooks();
+      if (!books.ok) {
+        ctx.ui.notify(`[fishread] ${books.error.code}: ${books.error.message}`, "error");
+        return;
       }
-    );
-    if (!selected) return;
+      if (books.data.books.length === 0) {
+        ctx.ui.notify("[fishread] 书库为空", "info");
+        return;
+      }
 
-    const used = await useBook(selected.id);
-    if (!used.ok) {
-      ctx.ui.notify(`[fishread] ${used.error.code}: ${used.error.message}`, "error");
+      const confirmDelete = (book: BookListItemDto) =>
+        ctx.ui.custom<boolean>(
+          (tui, theme, _kb, done) => new BookDeleteConfirmOverlay(book, tui, theme, done),
+          {
+            overlay: true,
+            overlayOptions: {
+              width: 54,
+              maxHeight: 10,
+              anchor: "center",
+              offsetX: 4,
+              offsetY: 1,
+              margin: 2,
+            },
+          }
+        );
+
+      const action = await ctx.ui.custom<BookLibraryAction | undefined>(
+        (tui, theme, _kb, done) => new BookSwitchOverlay(books.data, theme, tui, done, confirmDelete),
+        {
+          overlay: true,
+          overlayOptions: {
+            width: "72%",
+            minWidth: 52,
+            maxHeight: 20,
+            anchor: "center",
+            margin: 2,
+          },
+        }
+      );
+      if (!action) return;
+
+      if (action.type === "delete") {
+        const deleted = await deleteBook(action.book.id);
+        if (!deleted.ok) {
+          ctx.ui.notify(`[fishread] ${deleted.error.code}: ${deleted.error.message}`, "error");
+          return;
+        }
+
+        ctx.ui.notify(`[fishread] 已删除《${deleted.data.deleted.title}》`, "info");
+        if (deleted.data.cleared_current) {
+          await reloadReaderState(ctx);
+          bossKey.show(ctx, "status");
+          bossKey.show(ctx, "reader");
+        }
+        continue;
+      }
+
+      const used = await useBook(action.book.id);
+      if (!used.ok) {
+        ctx.ui.notify(`[fishread] ${used.error.code}: ${used.error.message}`, "error");
+        return;
+      }
+
+      const current = await readCurrent();
+      if (!current.ok) {
+        ctx.ui.notify(`[fishread] ${current.error.code}: ${current.error.message}`, "error");
+        return;
+      }
+      applyReaderState(ctx, current);
       return;
     }
-
-    const current = await readCurrent();
-    if (!current.ok) {
-      ctx.ui.notify(`[fishread] ${current.error.code}: ${current.error.message}`, "error");
-      return;
-    }
-    applyReaderState(ctx, current);
   }
 
   pi.registerShortcut(NEXT_PAGE_KEY, {

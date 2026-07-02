@@ -41,6 +41,11 @@ export interface BookUseDto {
   position: PositionDto;
 }
 
+export interface BookDeleteDto {
+  deleted: BookDto;
+  cleared_current: boolean;
+}
+
 export interface BookRefDto {
   id: string;
   title: string;
