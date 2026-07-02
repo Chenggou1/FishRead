@@ -3,6 +3,22 @@
   "version": "0.1.1",
   "type": "module",
   "description": "FishRead CLI — local EPUB reading runtime",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Chenggou1/FishRead.git",
+    "directory": "packages/cli"
+  },
+  "homepage": "https://github.com/Chenggou1/FishRead#readme",
+  "bugs": {
+    "url": "https://github.com/Chenggou1/FishRead/issues"
+  },
+  "keywords": [
+    "fishread",
+    "cli",
+    "reader",
+    "novel",
+    "epub"
+  ],
   "exports": {
     ".": {
       "import": "./index.js",
@@ -15,7 +31,8 @@
   },
   "files": [
     "bin/",
-    "index.js"
+    "index.js",
+    "index.d.ts"
   ],
   "optionalDependencies": {
     "@fishread/cli-darwin-arm64": "workspace:*",

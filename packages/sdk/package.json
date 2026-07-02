@@ -4,6 +4,22 @@
   "type": "module",
   "description": "FishRead SDK — shared TypeScript access to the local reading runtime",
   "main": "dist/index.js",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Chenggou1/FishRead.git",
+    "directory": "packages/sdk"
+  },
+  "homepage": "https://github.com/Chenggou1/FishRead#readme",
+  "bugs": {
+    "url": "https://github.com/Chenggou1/FishRead/issues"
+  },
+  "keywords": [
+    "fishread",
+    "sdk",
+    "reader",
+    "novel",
+    "epub"
+  ],
   "exports": {
     ".": {
       "types": "./src/index.ts",

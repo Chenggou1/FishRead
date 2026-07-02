@@ -2,14 +2,43 @@
   "name": "@fishread/pi-extension",
   "version": "0.1.1",
   "type": "module",
-  "description": "FishRead Pi extension — read EPUB in the conversation thread",
+  "description": "FishRead Pi extension — read novels in Pi with a boss key",
   "main": "dist/index.js",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Chenggou1/FishRead.git",
+    "directory": "packages/pi-extension"
+  },
+  "homepage": "https://github.com/Chenggou1/FishRead#readme",
+  "bugs": {
+    "url": "https://github.com/Chenggou1/FishRead/issues"
+  },
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "pi-coding-agent",
+    "novel",
+    "reader",
+    "fishread"
+  ],
+  "files": [
+    "dist/"
+  ],
   "scripts": {
     "build": "tsc",
     "check": "tsc --noEmit"
   },
   "dependencies": {
     "@fishread/sdk": "workspace:*"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*"
+  },
+  "pi": {
+    "extensions": [
+      "./dist/index.js"
+    ]
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "latest",
