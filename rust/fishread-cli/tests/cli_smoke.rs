@@ -245,6 +245,66 @@ fn error_book_not_found() {
 }
 
 #[test]
+fn book_rename_updates_titles_without_changing_position() {
+    let db = NamedTempFile::new().unwrap();
+    let db_path = db.path().to_str().unwrap();
+    run_ok(cmd(db_path).arg("init"));
+    let imported = run_ok(cmd(db_path).args(["import", FIXTURE]));
+    let book_id = imported["data"]["book"]["id"].as_str().unwrap().to_owned();
+
+    let before = run_ok(cmd(db_path).args(["read", "next"]));
+    let chapter_index = before["data"]["progress"]["chapter_index"]
+        .as_i64()
+        .unwrap();
+    let chunk_index = before["data"]["progress"]["chunk_index"].as_i64().unwrap();
+
+    let j = run_ok(cmd(db_path).args(["book", "rename", &book_id, "  Renamed Book  "]));
+    assert_eq!(j["data"]["book"]["id"], book_id.as_str());
+    assert_eq!(j["data"]["book"]["title"], "Renamed Book");
+
+    let j = run_ok(cmd(db_path).args(["book", "list"]));
+    let books = j["data"]["books"].as_array().unwrap();
+    let renamed = books
+        .iter()
+        .find(|b| b["id"].as_str() == Some(book_id.as_str()))
+        .unwrap();
+    assert_eq!(renamed["title"], "Renamed Book");
+    assert_eq!(renamed["position"]["chapter_index"], chapter_index);
+    assert_eq!(renamed["position"]["chunk_index"], chunk_index);
+
+    let j = run_ok(cmd(db_path).args(["book", "use", &book_id]));
+    assert_eq!(j["data"]["book"]["title"], "Renamed Book");
+    assert_eq!(j["data"]["position"]["chapter_index"], chapter_index);
+    assert_eq!(j["data"]["position"]["chunk_index"], chunk_index);
+
+    let j = run_ok(cmd(db_path).args(["read", "current"]));
+    assert_eq!(j["data"]["book"]["title"], "Renamed Book");
+    assert_eq!(j["data"]["progress"]["chapter_index"], chapter_index);
+    assert_eq!(j["data"]["progress"]["chunk_index"], chunk_index);
+
+    let j = run_ok(cmd(db_path).args(["chapter", "list"]));
+    assert_eq!(j["data"]["book"]["title"], "Renamed Book");
+}
+
+#[test]
+fn book_rename_validates_title_and_book_id() {
+    let db = NamedTempFile::new().unwrap();
+    let db_path = db.path().to_str().unwrap();
+    run_ok(cmd(db_path).arg("init"));
+    let imported = run_ok(cmd(db_path).args(["import", FIXTURE]));
+    let book_id = imported["data"]["book"]["id"].as_str().unwrap().to_owned();
+
+    let j = run_err(cmd(db_path).args(["book", "rename", &book_id, "   "]), 2);
+    assert_eq!(j["error"]["code"], "INVALID_ARGUMENT");
+
+    let j = run_err(
+        cmd(db_path).args(["book", "rename", "book_nonexistent", "Renamed Book"]),
+        1,
+    );
+    assert_eq!(j["error"]["code"], "BOOK_NOT_FOUND");
+}
+
+#[test]
 fn read_jump_missing_chunk_returns_chunk_not_found() {
     let db = NamedTempFile::new().unwrap();
     let db_path = db.path().to_str().unwrap();

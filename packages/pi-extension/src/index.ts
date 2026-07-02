@@ -10,6 +10,7 @@ import {
   readJump,
   readNext,
   readPrev,
+  renameBook,
   useBook,
 } from "@fishread/sdk";
 import type { ApiResponse, BookListItemDto, ReaderStateDto } from "@fishread/sdk";
@@ -34,8 +35,10 @@ import { isBossKeyOverlayResult } from "./components/overlay-result.js";
 import {
   BookSwitchOverlay,
   createBookDeleteConfirmOverlay,
+  createBookRenameOverlay,
   type BookDeleteConfirmation,
   type BookLibraryResult,
+  type BookRenamePromptResult,
   type BookSwitchOverlayState,
 } from "./overlays/book-library.js";
 import { TocOverlay, type TocOverlayResult, type TocOverlayState } from "./overlays/toc.js";
@@ -332,8 +335,26 @@ export default function (pi: ExtensionAPI) {
           }
         );
 
+      const promptRename = (book: BookListItemDto) =>
+        ctx.ui.custom<BookRenamePromptResult>(
+          (tui, theme, _kb, done) => createBookRenameOverlay(book, tui, theme, done),
+          {
+            overlay: true,
+            overlayOptions: {
+              width: "58%",
+              minWidth: 48,
+              maxHeight: 10,
+              anchor: "center",
+              offsetX: 4,
+              offsetY: 1,
+              margin: 2,
+            },
+          }
+        );
+
       const action = await ctx.ui.custom<BookLibraryResult>(
-        (tui, theme, _kb, done) => new BookSwitchOverlay(books.data, theme, tui, done, confirmDelete, restoreState),
+        (tui, theme, _kb, done) =>
+          new BookSwitchOverlay(books.data, theme, tui, done, confirmDelete, promptRename, restoreState),
         {
           overlay: true,
           overlayOptions: {
@@ -351,6 +372,22 @@ export default function (pi: ExtensionAPI) {
         return;
       }
       if (!action) return;
+
+      if (action.type === "rename") {
+        const renamed = await renameBook(action.book.id, action.title);
+        if (!renamed.ok) {
+          ctx.ui.notify(`[fishread] ${renamed.error.code}: ${renamed.error.message}`, "error");
+          return;
+        }
+
+        ctx.ui.notify(`[fishread] 已重命名为《${renamed.data.book.title}》`, "info");
+        if (action.book.current) {
+          await reloadReaderState(ctx);
+          bossKey.show(ctx, "status");
+          bossKey.show(ctx, "reader");
+        }
+        continue;
+      }
 
       if (action.type === "delete") {
         const deleted = await deleteBook(action.book.id);

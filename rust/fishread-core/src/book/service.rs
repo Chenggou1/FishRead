@@ -46,6 +46,13 @@ pub struct BookDeleteResult {
     pub cleared_current: bool,
 }
 
+pub struct BookRenameResult {
+    pub id: String,
+    pub title: String,
+    pub author: Option<String>,
+    pub format: String,
+}
+
 pub struct LibraryService<'a> {
     conn: &'a rusqlite::Connection,
 }
@@ -112,6 +119,37 @@ impl<'a> LibraryService<'a> {
                 chapter_index,
                 chunk_index,
             },
+        })
+    }
+
+    pub fn rename_book(
+        &self,
+        book_id: &str,
+        title: &str,
+    ) -> Result<BookRenameResult, FishReadError> {
+        let title = title.trim();
+        if title.is_empty() {
+            return Err(FishReadError::InvalidArgument(
+                "book title must not be empty".to_owned(),
+            ));
+        }
+
+        book_repo::find_by_id(self.conn, book_id)
+            .map_err(|e| FishReadError::Database(e.to_string()))?
+            .ok_or_else(|| FishReadError::BookNotFound(book_id.to_owned()))?;
+
+        book_repo::rename_book(self.conn, book_id, title)
+            .map_err(|e| FishReadError::Database(e.to_string()))?;
+
+        let row = book_repo::find_by_id(self.conn, book_id)
+            .map_err(|e| FishReadError::Database(e.to_string()))?
+            .ok_or_else(|| FishReadError::BookNotFound(book_id.to_owned()))?;
+
+        Ok(BookRenameResult {
+            id: row.id,
+            title: row.title,
+            author: row.author,
+            format: row.format,
         })
     }
 

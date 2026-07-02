@@ -87,6 +87,19 @@ pub fn upsert_reading_position(conn: &rusqlite::Connection, book_id: &str) -> an
     Ok(())
 }
 
+pub fn rename_book(
+    conn: &rusqlite::Connection,
+    book_id: &str,
+    title: &str,
+) -> anyhow::Result<usize> {
+    let now = crate::book::model::Timestamp::now().0;
+    conn.execute(
+        "UPDATE books SET title = ?1, updated_at = ?2 WHERE id = ?3",
+        params![title, now, book_id],
+    )
+    .context("failed to rename book")
+}
+
 pub fn delete_chapters(conn: &rusqlite::Connection, book_id: &str) -> anyhow::Result<usize> {
     conn.execute("DELETE FROM chapters WHERE book_id = ?1", params![book_id])
         .context("failed to delete book chapters")

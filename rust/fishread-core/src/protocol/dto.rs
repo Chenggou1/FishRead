@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-use crate::book::service::{BookDeleteResult, BookListResult, BookUseResult};
+use crate::book::service::{BookDeleteResult, BookListResult, BookRenameResult, BookUseResult};
 use crate::chapter::service::{AnchorChunk, AnchorPosition, ChapterListResult, ReadingAnchor};
 use crate::importer::model::{ImportResult, ImportWarning};
 use crate::reader::service::ReaderState;
@@ -178,6 +178,11 @@ pub struct BookUseDto {
 pub struct BookDeleteDto {
     pub deleted: BookDto,
     pub cleared_current: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub struct BookRenameDto {
+    pub book: BookDto,
 }
 
 #[derive(Debug, Serialize)]
@@ -374,6 +379,19 @@ impl From<BookDeleteResult> for BookDeleteDto {
                 format: r.format,
             },
             cleared_current: r.cleared_current,
+        }
+    }
+}
+
+impl From<BookRenameResult> for BookRenameDto {
+    fn from(r: BookRenameResult) -> Self {
+        Self {
+            book: BookDto {
+                id: r.id,
+                title: r.title,
+                author: r.author,
+                format: r.format,
+            },
         }
     }
 }

@@ -6,6 +6,7 @@ import {
   type ApiResult,
   type BookDeleteDto,
   type BookListDto,
+  type BookRenameDto,
   type BookUseDto,
   type ChapterListDto,
   type ImportResultDto,
@@ -152,6 +153,10 @@ export function useBook(bookId: string): Promise<ApiResult<BookUseDto>> {
 
 export function deleteBook(bookId: string): Promise<ApiResult<BookDeleteDto>> {
   return run(["book", "delete", bookId]) as Promise<ApiResult<BookDeleteDto>>;
+}
+
+export function renameBook(bookId: string, title: string): Promise<ApiResult<BookRenameDto>> {
+  return run(["book", "rename", bookId, title]) as Promise<ApiResult<BookRenameDto>>;
 }
 
 export function importBook(path: string): Promise<ApiResult<ImportResultDto>> {

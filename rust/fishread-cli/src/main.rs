@@ -60,6 +60,13 @@ enum BookCommand {
         /// Book ID to select
         book_id: String,
     },
+    /// Rename a book locally
+    Rename {
+        /// Book ID to rename
+        book_id: String,
+        /// New local book title
+        title: String,
+    },
     /// Delete a book and its local reading state
     Delete {
         /// Book ID to delete
@@ -109,6 +116,7 @@ fn main() {
         Command::Book { sub } => match sub {
             BookCommand::List => commands::book::list(),
             BookCommand::Use { book_id } => commands::book::use_book(&book_id),
+            BookCommand::Rename { book_id, title } => commands::book::rename_book(&book_id, &title),
             BookCommand::Delete { book_id } => commands::book::delete_book(&book_id),
         },
         Command::Chapter { sub } => match sub {

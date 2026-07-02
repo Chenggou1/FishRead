@@ -4,19 +4,25 @@ import type { BookListDto, BookListItemDto } from "@fishread/sdk";
 import { BOSS_KEY } from "../constants.js";
 import { ChoiceConfirmOverlay, type ConfirmationResult } from "../components/confirm-overlay.js";
 import { OverlayFrame, type OverlayTheme } from "../components/overlay-frame.js";
-import type { BossKeyOverlayResult } from "../components/overlay-result.js";
+import { isBossKeyOverlayResult, type BossKeyOverlayResult } from "../components/overlay-result.js";
+import {
+  TextInputOverlay,
+  type TextInputOverlayResult,
+} from "../components/text-input-overlay.js";
 import { clampIndex } from "../utils.js";
 
 const DELETE_CONFIRM_TITLE_MAX_WIDTH = 48;
 
 export type BookLibraryAction =
   | { type: "use"; book: BookListItemDto }
+  | { type: "rename"; book: BookListItemDto; title: string }
   | { type: "delete"; book: BookListItemDto };
 export type BookLibraryResult =
   | BookLibraryAction
   | BossKeyOverlayResult<BookSwitchOverlayState>
   | undefined;
 export type BookDeleteConfirmation = ConfirmationResult;
+export type BookRenamePromptResult = TextInputOverlayResult;
 
 export interface BookSwitchOverlayState {
   selectedIndex: number;
@@ -34,6 +40,7 @@ export class BookSwitchOverlay implements Component {
     private tui: TUI,
     private done: (action: BookLibraryResult) => void,
     private confirmDelete: (book: BookListItemDto) => Promise<BookDeleteConfirmation>,
+    private promptRename: (book: BookListItemDto) => Promise<BookRenamePromptResult>,
     initialState?: BookSwitchOverlayState
   ) {
     this.books = bookList.books;
@@ -61,6 +68,21 @@ export class BookSwitchOverlay implements Component {
     if (matchesKey(data, Key.enter)) {
       const book = this.selectedBook();
       this.done(book ? { type: "use", book } : undefined);
+      return;
+    }
+    if (data === "r") {
+      const book = this.selectedBook();
+      if (book) {
+        void this.promptRename(book).then((result) => {
+          if (typeof result === "string") {
+            this.done({ type: "rename", book, title: result });
+          } else if (isBossKeyOverlayResult(result)) {
+            this.done({ type: "boss-key", state: this.snapshot() });
+          } else {
+            this.tui.requestRender();
+          }
+        });
+      }
       return;
     }
     if (data === "d") {
@@ -171,8 +193,28 @@ export class BookSwitchOverlay implements Component {
   }
 
   private footerText(width: number): string {
-    return this.theme.fg("dim", truncateToWidth("↑↓ 选择 · Enter 切换 · d 删除 · Esc 关闭", width));
+    return this.theme.fg("dim", truncateToWidth("↑↓ 选择 · Enter 切换 · r 重命名 · d 删除 · Esc 关闭", width));
   }
+}
+
+export function createBookRenameOverlay(
+  book: BookListItemDto,
+  tui: TUI,
+  theme: OverlayTheme,
+  done: (result: BookRenamePromptResult) => void
+): Component {
+  return new TextInputOverlay(theme, tui, done, {
+    bossKey: BOSS_KEY,
+    title: "重命名图书",
+    label: "书名",
+    initialValue: book.title,
+    emptyMessage: "书名不能为空",
+    footer: "Enter 保存 · Esc 取消",
+    body: (overlayTheme, width) => [
+      overlayTheme.fg("dim", truncateToWidth("当前书名", width, "...", true)),
+      overlayTheme.fg("text", truncateToWidth(book.title, width, "...", true)),
+    ],
+  });
 }
 
 export function createBookDeleteConfirmOverlay(

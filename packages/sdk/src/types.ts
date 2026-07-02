@@ -70,6 +70,10 @@ export interface BookDeleteDto {
   cleared_current: boolean;
 }
 
+export interface BookRenameDto {
+  book: BookDto;
+}
+
 export interface BookRefDto {
   id: string;
   title: string;
