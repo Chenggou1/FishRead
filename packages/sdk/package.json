@@ -1,6 +1,6 @@
 {
   "name": "@fishread/sdk",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "type": "module",
   "description": "FishRead SDK — shared TypeScript access to the local reading runtime",
   "main": "dist/index.js",

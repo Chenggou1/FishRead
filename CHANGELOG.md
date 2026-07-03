@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.1.2](https://github.com/Chenggou1/FishRead/compare/v0.1.1...v0.1.2) (2026-07-03)
+
+
+### Features
+
+* add database migration readiness ([ae53259](https://github.com/Chenggou1/FishRead/commit/ae53259d16569e68caf876ebbe08b0a0bce3dcee))
+* add import path overlay ([d0afac5](https://github.com/Chenggou1/FishRead/commit/d0afac5e286114dcd292ad0e558cb9fe18785dc5))
+* support book renaming ([18e0316](https://github.com/Chenggou1/FishRead/commit/18e0316b7bbfd2120f0b9b568d1fdf8f27094f3a))
+
+
+### Bug Fixes
+
+* refine import warnings and boss key overlays ([2db22a5](https://github.com/Chenggou1/FishRead/commit/2db22a5928aa6f4eb3b3a96cee90838f12531206))
+* use terminal foreground for reader text ([1fc0581](https://github.com/Chenggou1/FishRead/commit/1fc05812c41dbcb74c160f14c2f8259ffc33160c))
+
 ## [0.1.1](https://github.com/Chenggou1/FishRead/compare/v0.1.0...v0.1.1) (2026-07-02)
 
 

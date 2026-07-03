@@ -1,6 +1,6 @@
 {
   "name": "@fishread/pi-extension",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "type": "module",
   "description": "FishRead Pi extension — read novels in Pi with a boss key",
   "main": "dist/index.js",
